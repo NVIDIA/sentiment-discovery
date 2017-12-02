@@ -44,12 +44,12 @@ Additionally, we tried setting `torch.backends.cuda.benchmark=True`, but it prov
 ## Open Questions
 The best research work often leaves the reader with more questions than it answers. Here's some of the questions we thought of while reproducing this work and are now working on as a result.
  * Waiting for long training runs to end can be frustrating. How can we improve the speed and scalability of our system without sacrificing convergence/performance?
- * Sentiment is more black and white than good/bad, it's much more nuanced and a result of multiple factors. What are the other neurons in our sentiment classification weights detecting? What other discriminitive language tasks would these features do well on?
-   * More generally, what other tasks could unsupervised language modeling at scale be used for? 
+ * Sentiment is more black and white than good/bad, it's much more nuanced and a result of multiple factors. What are the other significant neurons according to our sentiment classification weights detecting? What other discriminitive language tasks would these features do well on?
+   * More generally, what other tasks could unsupervised language modeling at scale be used for? Discriminative or not.
  * Our model learned sentiment because it was a relevant piece of information for reconstruction of product reviews, not because it was told to learn sentiment. In our case we even found that it actually learned negative sentiment. In an ideal scenario we would have the ability to supervise/force our model to learn/learn about a specific characteristic, such as author frustration.  
-  * Given a task we want to transfer to, how can we use performance on that task to regularize what our model learns about language?  
+   * Given a target transfer task, how can performance on that task be used to regularize what the model learns about language?  
  * The performance of the model on sentiment transfer seems to have a slight dependence on the most recently trained examples from our dataset. Due to this dependence on data, we'd ideally like to fine tune our model to a subset of data that is relevant to the task being transferred to. 
-  * With this in mind, given a specific subset of data, how can we fine-tune our language model to the specified data without losing the general language properties of the larger corpus?
+   * With this in mind, given a specific subset of data, how can we fine-tune our language model to the specified data without losing the general language properties of the larger corpus?
 
 ## Setup
 ### Install
@@ -80,16 +80,13 @@ Script results will be saved/logged to the `<experiment_dir>/<experiment_name>/*
 ### Unsupervised Reconstruction
 Train a recurrent language model (mlstm/lstm) and saves it to the `<model_dir>/` directory in the above hierarchy. The metric histories will be available in the appropriate `<history>/` directory in the same hierarchy. In order to apply `weight_norm` only to lstm parameters as specified by the paper we use the `-lstm_only` flag.
 
-
 ```
 python text_reconstruction.py -experiment_dir ./experiments -experiment_name mlstm -model_dir model -cuda \
 -embed_size 64 -rnn_size 4096 -layers 1 -weight_norm -lstm_only -rnn_type mlstm -dropout 0 -persist_state 1 \
 -seq_length 256 -batch_size 32 -lr 0.000125 --optimizer_type=Adam -lr_scheduler LinearLR -epochs 1  \
--train data/amazon/reviews.json -valid data/amazon/reviews.json -test data/amazon/reviews.json -data_set_type unsupervised \
--lazy -text_key sentence
- 
+-train data/amazon/reviews.json -valid data/amazon/reviews.json -test data/amazon/reviews.json \
+-data_set_type unsupervised -lazy -text_key sentence 
 ```
-
 
 The training process takes in a json list (or csv) file as a dataset where each entry has key (or column) `text_key` containing samples of text to model.
 
@@ -104,8 +101,6 @@ Lastly, We know waiting for more than 1 million updates over 1 epoch for large d
 <!---We train an mLSTM with the specified parameters and save it to the directory `<model_dir>/<save_model>`. -->
 <!--move up-->
 <!--We train the model with Adam and a linearly decaying learning rate as per the paper. Note that we utilize an `lr` of `1.25e-4` as opposed to the paper's `5e-4` in order to account for the decreased batch size (the original paper had `batch_size` 32 x 4 gpus) and keep sample temperature the same. Lastly we apply weight normalization to the mLSTM parameters via the `-weight_norm` flag.-->
-
-<!--The training process will take in a json list file as a dataset where each entry has key `text_key` denoting samples of text to model. As specified in the paper there are a total of 1002 shards (1000 training, 1 validation, 1 test), so we divide `train` into 1002 shards and take the first 1000, and divide `valid`/`train` into 1002 shards and take shard 1001/1002 respectively. The dataset entries will be transposed according to `batch_size` so that they might be concatenated in order to persist hidden state across a shard in the training process. https://yagr.nvidia.com/ADLR/sentiment-os/blob/master/sentiment_discovery/data_utils/samplers.py#L114-->
 
 ![Our Loss results](./figures/loss.png "Unsupervised Reconstruction BPC")
 
@@ -134,8 +129,9 @@ The index of the resulting model weight with the greatest magnitude is then used
 Below is example output for running our trained model on the Binary Stanford Sentiment Treebank task.
 
 ```
-python3 sentiment_transfer.py -experiment_dir ./experiments -experiment_name mlstm -model_dir model -load_model e0.pt -cuda \
--train binary_sst/train_binary_sent.csv -valid binary_sst/dev_binary_sent.csv -test binary_sst/test_binary_sent.csv -text_key sentence -label_key label
+python3 sentiment_transfer.py -experiment_dir ./experiments -experiment_name mlstm -model_dir model -cuda \
+-train binary_sst/train_binary_sent.csv -valid binary_sst/dev_binary_sent.csv -test binary_sst/test_binary_sent.csv \
+-text_key sentence -label_key label -load_model e0.pt 
 ```
 
 ```
@@ -155,8 +151,9 @@ neuron(s) 1285, 1503, 3986, 1228, 2301 are top sentiment neurons
 With the paper's model:
 
 ```
-python3 sentiment_transfer.py -experiment_dir ./experiments -experiment_name mlstm_paper -model_dir model -load_model e0.pt -cuda \
--train binary_sst/train_binary_sent.csv -valid binary_sst/dev_binary_sent.csv -test binary_sst/test_binary_sent.csv -text_key sentence -label_key label
+python3 sentiment_transfer.py -experiment_dir ./experiments -experiment_name mlstm_paper -model_dir model -cuda \
+-train binary_sst/train_binary_sent.csv -valid binary_sst/dev_binary_sent.csv -test binary_sst/test_binary_sent.csv \
+-text_key sentence -label_key label -load_model e0.pt 
 ```
 
 ```
@@ -191,8 +188,9 @@ Without loss of generality we're going to go through this section first referrin
 Armed with this information we can use the script to analyze the following exerpt from the beginning of a review about The League of Extraordinary Gentlemen.
 
 ```
-python3 visualize.py -cuda -experiment_dir ./experiments -experiment_name mlstm_paper -model_dir model -neuron 2388 -load_model e0.pt \
--text "25 August 2003 League of Extraordinary Gentlemen: Sean Connery is one of the all time greats and I have been a fan of his since the 1950's." 
+python3 visualize.py -experiment_dir ./experiments -experiment_name mlstm_paper -model_dir model -cuda \
+-neuron 2388 -load_model e0.pt -text "25 August 2003 League of Extraordinary Gentlemen: Sean Connery is \
+one of the all time greats and I have been a fan of his since the 1950's." 
 ```
 
 ![sentiment heatmap](./figures/heat_review.png "Sentiment Heatmap")
@@ -200,8 +198,9 @@ python3 visualize.py -cuda -experiment_dir ./experiments -experiment_name mlstm_
 However, not only does this script analyze text, but the user can also specify the begining of a text snippet with `text` and generate additional following text up to a total `seq_length`. Simply set the `-generate` flag.
 
 ```
-python3 visualize.py -cuda -experiment_dir ./experiments -experiment_name mlstm_paper -model_dir model -load_model e0.pt -neuron 2388 \
--text "25 August 2003 League of Extraordinary Gentlemen: Sean Connery is" -generate
+python3 visualize.py -experiment_dir ./experiments -experiment_name mlstm_paper -model_dir model -cuda \
+-neuron 2388 -load_model e0.pt -text "25 August 2003 League of Extraordinary Gentlemen: Sean Connery is \
+one of the all time greats and I have been a fan of his since the 1950's." -generate
 ```
 
 ![generated heatmap](./figures/heat_gen.png "Generated Sentiment Heatmap")
@@ -214,11 +213,12 @@ In addition to generating text, the user can also set the sentiment of the gener
 
 <!--Lastly, the unsupervised learning process is just that, unsupervised, we never told it to learn positive sentiment neuron. As this is the case we find that occassionally we learn a negative sentiment neuron instead (as seen below). If this is the case turn on the `-negate` flag when trying to generate any heatmap (generated or not).-->
 
-Throughout the course of this section we've detailed how to visualize sentiment heatmaps with the original model from the paper. However, a slightly different approach is needed if a negative sentiment model is learned, as is the case with our reproduction. Simply turn on the `-negate` flag in order to visualize heatmaps for negative sentiment models such as ours. This must be done regardless of whether text is being analyzed or generated. (**Note**: our negative sentiment neuron is 1285 not 2388).
+Throughout the course of this section we've detailed how to visualize sentiment heatmaps with the original model from the paper. However, a slightly different approach is needed if a negative sentiment model is learned, as is the case with our reproduction. Simply turn on the `-negate` flag in order to visualize heatmaps for negative sentiment models such as ours. This must be done regardless of whether text is being analyzed or generated. (**Note**: our neuron is 1285 not 2388 for this model).
 
 ```
-python3 visualize.py -cuda -experiment_dir ./experiments -experiment_name mlstm -model_dir model -load_model e0.pt -neuron 1285 \
--text "25 August 2003 League of Extraordinary Gentlemen: Sean Connery is" -generate -overwrite +/-1 -negate
+python3 visualize.py -experiment_dir ./experiments -experiment_name mlstm -model_dir model -cuda \
+-neuron 1285 -load_model e0.pt -text "25 August 2003 League of Extraordinary Gentlemen: Sean Connery is \
+one of the all time greats and I have been a fan of his since the 1950's." -generate
 ```
 
 ![negated neuron](./figures/heat_gen_negate_overwrite.png "Generated Negated Sentiment Heatmaps")
@@ -237,11 +237,11 @@ For a list of default values for all flags look at `./cfg/configure_visualizatio
 
 ### Distributed Usage
 ```
-python text_reconstruction.py -experiment_dir ./experiments -experiment_name mlstm_paper -model_dir model \
--embed_size 64 -rnn_size 4096 -layers 1 -weight_norm -rnn_type mlstm -dropout 0 \
--seq_length 256 -batch_size 32 -train data/amazon/reviews.json -valid data/amazon/reviews.json -test data/amazon/reviews.json -data_set_type unsupervised -lazy \
--lr 0.00025 --optimizer_type=Adam -lr_scheduler LinearLR -epochs 1 -persist_state 1 \
--num_gpus 2 -distributed -cuda
+python text_reconstruction.py -experiment_dir ./experiments -experiment_name mlstm -model_dir model -cuda \
+-embed_size 64 -rnn_size 4096 -layers 1 -weight_norm -lstm_only -rnn_type mlstm -dropout 0 -persist_state 1 \
+-seq_length 256 -batch_size 32 -lr 0.00025 --optimizer_type=Adam -lr_scheduler LinearLR -epochs 1  \
+-train data/amazon/reviews.json -valid data/amazon/reviews.json -test data/amazon/reviews.json \
+-data_set_type unsupervised -lazy -text_key sentence -num_gpus 2 -distributed
 ```
 
 In order to utilize Data Parallelism during training time ensure that `-cuda` is in use and that `-num_gpus` >1. As mentioned previously, vanilla DataParallelism produces no speedup for recurrent architectures. In order to circumvent this problem turn on the `-distributed` flag to utilize PyTorch's DistributedDataParallel instead and experience  speedup gains. 
