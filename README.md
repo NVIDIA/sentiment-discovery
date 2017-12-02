@@ -130,7 +130,7 @@ Below is example output for running our trained model on the Binary Stanford Sen
 
 ```
 python3 sentiment_transfer.py -experiment_dir ./experiments -experiment_name mlstm -model_dir model -cuda \
--train binary_sst/train_binary_sent.csv -valid binary_sst/dev_binary_sent.csv -test binary_sst/test_binary_sent.csv \
+-train binary_sst/train.csv -valid binary_sst/val.csv -test binary_sst/test.csv \
 -text_key sentence -label_key label -load_model e0.pt 
 ```
 
@@ -152,7 +152,7 @@ With the paper's model:
 
 ```
 python3 sentiment_transfer.py -experiment_dir ./experiments -experiment_name mlstm_paper -model_dir model -cuda \
--train binary_sst/train_binary_sent.csv -valid binary_sst/dev_binary_sent.csv -test binary_sst/test_binary_sent.csv \
+-train binary_sst/train.csv -valid binary_sst/val.csv -test binary_sst/test.csv \
 -text_key sentence -label_key label -load_model e0.pt 
 ```
 
