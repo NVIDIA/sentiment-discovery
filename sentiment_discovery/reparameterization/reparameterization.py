@@ -1,6 +1,7 @@
 import torch
 from torch.nn.parameter import Parameter
 
+
 class Reparameterization(object):
 	"""
 	Class interface for performing weight reparameterizations
@@ -13,6 +14,7 @@ class Reparameterization(object):
 		reparameterization_names (list, str): contains names of all parameters 
 			needed to compute reparameterization. 
 	"""
+	
 	def __init__(self, name, dim, retain_forward=True):
 		self.name = name
 		self.dim = dim
@@ -30,6 +32,7 @@ class Reparameterization(object):
 		Returns:
 			w (Tensor): Tensor object containing value of reparameterized weight
 		"""
+		
 		raise NotImplementedError
 
 	def reparameterize(self, name, weight, dim):
@@ -46,6 +49,7 @@ class Reparameterization(object):
 			names (list, str): names of Parameters to be used for reparameterization
 			params (list, Parameter): Parameters to be used for reparameterization
 		"""
+		
 		raise NotImplementedError
 
 	@staticmethod
@@ -53,6 +57,7 @@ class Reparameterization(object):
 		"""
 		Applies reparametrization to module's `name` parameter and modifies instance attributes as appropriate.
 		"""
+		
 		if reparameterization is None:
 			reparameterization = Reparameterization
 		name2use, module2use = Reparameterization.get_name_and_module(module, name)
@@ -93,6 +98,7 @@ class Reparameterization(object):
 		"""
 		recursively fetches (possible) child module and name of weight to be reparameterized
 		"""
+		
 		name2use = None
 		module2use = None
 		names = name.split('.')
@@ -108,11 +114,17 @@ class Reparameterization(object):
 		return name2use, module2use
 
 	def get_params(self, module):
-		"""gets params of reparameterization based on known attribute names"""
+		"""
+		gets params of reparameterization based on known attribute names
+		"""
+		
 		return [getattr(module, n) for n in self.reparameterization_names]
 
 	def remove(self, module):
-		"""removes reparameterization and backward hook (does not remove forward hook)"""
+		"""
+		removes reparameterization and backward hook (does not remove forward hook)
+		"""
+		
 		for p in self.get_params(module):
 			p.requires_grad = False
 		weight = self.compute_weight(module)
@@ -123,14 +135,20 @@ class Reparameterization(object):
 		del module._backward_hooks[self.backward_hook_key]
 
 	def __call__(self, module, inputs):
-		"""callable hook for forward pass"""
+		"""
+		callable hook for forward pass
+		"""
+		
 		_w = getattr(module, self.name)
 		if not self.evaluated or _w is None:
 			setattr(module, self.name, self.compute_weight(module))
 			self.evaluated = True
 
 	def backward_hook(self, module, grad_input, grad_output):
-		"""callable hook for backward pass"""
+		"""
+		callable hook for backward pass
+		"""
+		
 		wn = getattr(module, self.name)
 		if wn is not None and not self.retain_forward and self.evaluated:
 			del wn.grad
