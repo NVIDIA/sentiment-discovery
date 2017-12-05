@@ -1,5 +1,5 @@
 # PyTorch Unsupervised Sentiment Discovery
-This codebase is part of our effort to reproduce, analyze, and scale the [Generating Reviews and Discovering Sentiment](https://github.com/openai/generating-reviews-discovering-sentiment) paper from OpenAI. Check out our in-depth reproducibility report (coming soon) for more details. 
+This codebase is part of our effort to reproduce, analyze, and scale the [Generating Reviews and Discovering Sentiment](https://github.com/openai/generating-reviews-discovering-sentiment) paper from OpenAI.
 
 Early efforts have yielded a training time of 5 days on 8 volta-class gpus down from the paper's training time of 1 month.
 
