@@ -3,7 +3,7 @@ from collections import defaultdict
 import numpy as np
 
 from sentiment_discovery.reparameterization import apply_weight_norm, remove_weight_norm
-from .data_parallel import DataParallel, DistributedDataParallel
+from torch.nn.data_parallel import DataParallel, DistributedDataParallel
 from .utils import copy_state, clip_gradients, calc_grad_norm, clip_gradient
 
 def no_op(loss_tensors):

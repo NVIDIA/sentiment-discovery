@@ -58,8 +58,9 @@ Samples from the tails of the feature distribution correlate strongly with posit
 Install the sentiment_discovery package with `pip setup.py install` in order to run the modules/scripts within this repo.
 
 ### Python Requirements
+At this time we only support python3.
  * numpy
- * pytorch
+ * pytorch (>= 0.3.0)
  * pandas
  * scikit-learn
  * matplotlib

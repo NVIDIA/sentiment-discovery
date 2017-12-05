@@ -14,12 +14,14 @@ sns.set_style({'font.family': 'monospace'})
 
 from cfg import cfg, configure_usage
 
+
 def make_batch(data, bsz):
 	ids = torch.ByteTensor(data.encode()).long()
 	nbatch = ids.size(0) // bsz
 	ids = ids.narrow(0, 0, nbatch * bsz)
 	ids = ids.view(bsz, -1).contiguous()
 	return ids
+
 
 def run_step(x, s, embed, rnn, neuron_idx, last_layer=-1, overwrite=None):
 	emb = embed(x)
@@ -33,6 +35,7 @@ def run_step(x, s, embed, rnn, neuron_idx, last_layer=-1, overwrite=None):
 		hidden.data[last_layer,0,neuron_idx] = overwrite
 	return states, output, chr(x.data[0]), feat
 
+
 def transform_text(text, states, embed, rnn, neuron_idx, last_layer=-1):
 	text_out = []
 	values = []
@@ -42,6 +45,7 @@ def transform_text(text, states, embed, rnn, neuron_idx, last_layer=-1):
 		text_out.append(c)
 		values.append(feat)
 	return text_out, values, states, output
+
 
 def get_input(output, temperature=0.):
 	if temperature == 0:
@@ -54,6 +58,7 @@ def get_input(output, temperature=0.):
 		inp = inp.cuda()
 	return inp
 
+
 def generate_text(output, states, embed, rnn, neuron_idx, last_layer=-1,
 					gen_length=32, temperature=0., overwrite=None):
 	text_out = []
@@ -64,6 +69,7 @@ def generate_text(output, states, embed, rnn, neuron_idx, last_layer=-1,
 		text_out.append(c)
 		values.append(feat)
 	return text_out, values
+
 
 def plot_neuron_heatmap(text, values, savename=None, negate=False, cell_height=.325, cell_width=.15):
 	n_limit = 74
@@ -88,6 +94,7 @@ def plot_neuron_heatmap(text, values, savename=None, negate=False, cell_height=.
 	# clear plot for next graph since we returned `hmap`
 	plt.clf()
 	return hmap
+
 
 def visualize(text, embed, rnn, init_state, seq_length, temperature=0, overwrite=0, neuron=2388,
 				logger=None, layer=-1, generate=False, cuda=False, negate = False):
@@ -122,6 +129,7 @@ def visualize(text, embed, rnn, init_state, seq_length, temperature=0, overwrite
 		save_str = logger.get_log_dir('heatmaps')
 	save_str = os.path.join(save_str, ''.join(out_text[:50])+'.png')
 	plot_neuron_heatmap(out_text, out_values, save_str, negate)
+
 
 if __name__ == '__main__':
 	configure_usage('visualize.py')

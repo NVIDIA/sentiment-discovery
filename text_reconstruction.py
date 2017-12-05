@@ -25,9 +25,9 @@ def run_epoch(model, epoch, data2use, data_fn, num_batches, is_training=False,
 	print('entering training epoch %s'% (str(epoch),))
 	#handle config
 	if _cfg is not None:
-		cfg = _cfg
+		config = _cfg
 	else:
-		global cfg
+		config = cfg
 	#set training mode
 	model.train(is_training)
 	loss_avg = 0
@@ -49,7 +49,7 @@ def run_epoch(model, epoch, data2use, data_fn, num_batches, is_training=False,
 					epoch, s, model.gn, model.loss.data[0]))
 
 		computation_time = time.time()-start
-		ch_per_sec = (cfg.batch_size*cfg.seq_length)/computation_time
+		ch_per_sec = (config.batch_size*config.seq_length)/computation_time
 
 		#get loss and calculate 100 step moving average
 		loss = model.loss.data.cpu()[0]

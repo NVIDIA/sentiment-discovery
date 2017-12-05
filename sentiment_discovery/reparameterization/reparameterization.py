@@ -13,6 +13,7 @@ class Reparameterization(object):
 		reparameterization_names (list, str): contains names of all parameters 
 			needed to compute reparameterization. 
 	"""
+
 	def __init__(self, name, dim, retain_forward=True):
 		self.name = name
 		self.dim = dim
