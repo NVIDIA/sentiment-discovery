@@ -1,11 +1,11 @@
 # PyTorch Unsupervised Sentiment Discovery
-This codebase is part of our effort to reproduce, analyze, and scale the [Generating Reviews and Discovering Sentiment](https://github.com/openai/generating-reviews-discovering-sentiment) paper from OpenAI. Check out our in-depth reproducibility report (coming soon) for more details. 
+This codebase is part of our effort to reproduce, analyze, and scale the [Generating Reviews and Discovering Sentiment](https://github.com/openai/generating-reviews-discovering-sentiment) paper from OpenAI.
 
-Early efforts have yielded a training time of 5 days on 8 volta-class gpus down from the paper's training time of 1 month.
+Early efforts have yielded a training time of 5 days on 8 volta-class gpus down from the training time of 1 month reported in the paper.
 
 A byte-level (char-level) recurrent language model ([multiplicative LSTM](https://arxiv.org/abs/1609.07959)) for unsupervised modeling of large text datasets, such as the [amazon-review dataset](http://jmcauley.ucsd.edu/data/amazon/), is implemented in PyTorch. 
 
-The learned language model can be transferred to other natural language tasks where it is used to featurize text samples. The featurizations provide a strong initialization point for discriminative language tasks, and allow for competitive task performance given only a few labeled samples. To illustrate this the model is transferred to the [Binary Stanford Sentiment Treebank task](https://nlp.stanford.edu/sentiment/treebank.html).
+The learned language model can be transferred to other natural language processing (NLP) tasks where it is used to featurize text samples. The featurizations provide a strong initialization point for discriminative language tasks, and allow for competitive task performance given only a few labeled samples. To illustrate this the model is transferred to the [Binary Stanford Sentiment Treebank task](https://nlp.stanford.edu/sentiment/treebank.html).
 
 ![main performance fig](./figures/reproduction_graph.png "Reconstruction and Transfer performance")
 
@@ -72,7 +72,7 @@ We've included our own trained mlstm/lstm models as well as OpenAI's mlstm model
  * [openai mlstm](https://drive.google.com/open?id=1k96ZwUq8PWoBffz1o-vxHfEVWryCQyHN)[329MB]
 
 ### Data Downloads
-We've included a link to a preprocessed version of the amazon review dataset. We've included links to both the full dataset, and a pre-sharded (into train/val/test) version meant for lazy evaluation that we used to generate our results.
+We've included a link to a preprocessed version of the amazon review dataset. We've also included links to both the full dataset, and a pre-sharded (into train/val/test) version meant for lazy evaluation that we used to generate our results.
  * [full](https://drive.google.com/open?id=1_8dIhs5a53jAkXm3Q7hfMxUdBsUHeg5W)[40GB]
  * [lazy shards](https://drive.google.com/file/d/1ZK2mSBk253SG0oVestvjfp2gnMjIA71Z/view?usp=sharing)[37GB]
 
@@ -113,7 +113,7 @@ The resulting loss curve over 1 (x4 because of data parallelism) million iterati
 
 #### Reconstruction Flags
 For a list of default values for all flags look at `./cfg/configure_text_reconstruction.py`
- * `no_loss` - do not track the loss curve of the model
+ * `no_loss` - do not compute or track the loss curve of the model
  * `lr` - Starting learning rate.
  * `lr_scheduler` - one of [ExponentialLR,LinearLR]
  * `lr_factor` - factor by which to decay exponential learning rate
@@ -166,7 +166,7 @@ Analyze sentiment on your own data by using one of the [pretrained models](#pret
 If you don't have labels for your data set make sure to use the `-no_test_eval` flag. 
 
 #### Train a Different Classifier
-If you have your own unique classification dataset complete with training labels, you can also use a pretrained model to extract relevant features. 
+If you have your own unique classification dataset complete with training labels, you can also use a pretrained model to extract relevant features for classification. 
 
 Supply your own `-train` (and evaluation) dataset while making sure to specify the right text and label keys.
 
@@ -258,9 +258,9 @@ Also make sure to scale the [learning rate](#learning-rate-scaling) as appropria
  * `embed_size` - embedding size for data
  * `rnn_type` - one of <`mlstm`,`lstm`>
  * `rnn_size` - hidden state dimension of rnn
- * `layers` - # of stacked recurrent layers
+ * `layers` - Number of stacked recurrent layers
  * `dropout` - dropout probability after hidden state (0 = None, 1 = all dropout)
- * `weight_norm` - boolean flag that when added will apply weight norm only to the recurrent (m)LSTM parameters
+ * `weight_norm` - boolean flag, which, when enabled, will apply weight norm only to the recurrent (m)LSTM parameters
  * `lstm_only` - if `-weight_norm` is applied to the model, apply it to the lstm parmeters only
  * `model_dir` - subdirectory where models are saved in `<experiment_dir>/<experiment_name>`
  * `load_model` - a specific checkpoint file to load from `<experiment_dir>/<experiment_name>/<model_dir>`
@@ -292,19 +292,6 @@ Also make sure to scale the [learning rate](#learning-rate-scaling) as appropria
  * `valid` - path to validation set
  * `test` - path to test set
 
-#### Learning Flags
- * `should_test` - whether to train or evaluate a model. Used in `text_reconstruction.py`
- * `no_loss` - If `should_test` is on then no loss is calculated in addition to no optimization being performed
- * `lr` - intial learning rate
- * `lr_scheduler` - learning rate scheduling regime <ExponentialLR,LinearLR>
- * `lr_factor` - decay factor if exponential learning rate decay is used.
- * `optimizer_type` - Optimizer type to use. This should be a class name from torch.optim (ex. SGD, Adam, etc.)
- * `clip` - Gradient clipping value. Bound all gradient values from [-clip, clip]
- * `epochs` - Number of epochs to run training for
- * `max_iters` - Can specify max number of training updates instead of number of epochs to run. `max_iters` takes presedence over `epochs`.
- * `start_epoch` - Epoch to resume training from if `epochs` is being used.
- * `start_iter` - iteration to resume training from if `max_iters` is being used.
-
 #### Device Flags
  * `cuda` - utilize gpus to process strings. Should be on as cpu is too slow to process this.
  * `num_gpus` - number of gpus available
@@ -333,7 +320,8 @@ Also make sure to scale the [learning rate](#learning-rate-scaling) as appropria
 ## Acknowledgement
 Thanks to @guillete for providing a lightweight pytorch [port](https://github.com/guillitte/pytorch-sentiment-neuron) of the original weights.
 
-This project uses the [amazon review dataset](http://jmcauley.ucsd.edu/data/amazon/) collected by J. M. Cauley
+This project uses the [amazon review dataset](http://jmcauley.ucsd.edu/data/amazon/) collected by J. McAuley
+
 
 ## Thanks
 Want to help out? Open up an issue with questions/suggestions or pull requests ranging from minor fixes to new functionality.

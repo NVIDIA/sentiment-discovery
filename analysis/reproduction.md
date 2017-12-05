@@ -1,5 +1,5 @@
 # Reproducing Results
-Our reproduction achieved comparable results in both unsupervised reconstruction and sentiment transfer. This is denoted by solid lines for our reproduction and dashed lines for the original. We used weights sourced from OpenAI to manually verify performance on our instance of the data.
+Our reproduction achieved comparable results in both unsupervised reconstruction and sentiment transfer. This is denoted by solid lines for our model and dashed lines for OpenAI's model. We used weights sourced from OpenAI to manually verify performance on our instance of the data.
 
 ![reproduction results graph](../figures/reproduction_graph.png "Reproduction metrics")
 
