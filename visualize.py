@@ -65,7 +65,7 @@ def generate_text(output, states, embed, rnn, neuron_idx, last_layer=-1,
 		values.append(feat)
 	return text_out, values
 
-def plot_neuron_heatmap(text, values, savename=None, negate=False, cell_height=.3, cell_width=.15):
+def plot_neuron_heatmap(text, values, savename=None, negate=False, cell_height=.325, cell_width=.15):
 	n_limit = 74
 	num_chars = len(text)
 	total_chars = math.ceil(num_chars/float(n_limit))*n_limit
@@ -120,7 +120,7 @@ def visualize(text, embed, rnn, init_state, seq_length, temperature=0, overwrite
 	save_str = ''
 	if logger is not None:
 		save_str = logger.get_log_dir('heatmaps')
-	save_str = os.path.join(save_str, ''.join(out_text[:100])+'.png')
+	save_str = os.path.join(save_str, ''.join(out_text[:50])+'.png')
 	plot_neuron_heatmap(out_text, out_values, save_str, negate)
 
 if __name__ == '__main__':

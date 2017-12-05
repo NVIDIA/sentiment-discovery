@@ -1,55 +1,58 @@
 # PyTorch Unsupervised Sentiment Discovery
-This PyTorch codebase is part of our effort to reproduce the [Generating Reviews and Discovering Sentiment](https://openreview.net/forum?id=SJ71VXZAZ&noteId=SJ71VXZAZ) for the [ICLR reproducability challenge](http://www.cs.mcgill.ca/~jpineau/ICLR2018-ReproducibilityChallenge.html). Check out our in-depth reproducability report (coming soon) and blog post (coming soon) for more details.
+<!--This PyTorch codebase is part of our effort to reproduce the [Generating Reviews and Discovering Sentiment](https://openreview.net/forum?id=SJ71VXZAZ&noteId=SJ71VXZAZ) for the [ICLR reproducability challenge](http://www.cs.mcgill.ca/~jpineau/ICLR2018-ReproducibilityChallenge.html). Check out our in-depth reproducability report (coming soon) and blog post (coming soon) for more details.-->
 
-This code implements a **multi-layer [Multiplicative LSTM](https://arxiv.org/abs/1609.07959)** in **PyTorch** for training/sampling from character-level language models in an unsupervised fashion. 
+This codebase is part of our effort to **reproduce, analyze, and scale** the [Generating Reviews and Discovering Sentiment](https://github.com/openai/generating-reviews-discovering-sentiment) paper from OpenAI. Check out our in-depth reproducibility report (coming soon) for more details. 
 
-Utilizing this unsupervised language model to then featurize text samples for sentiment analysis leads to the observation that a single neuron in the mLSTM cell state corresponds directly to sentiment, and is able to separate the text samples into pos/neg clusters based on the logit values of this single neuron.
+Early efforts have yielded a **training time of 5 days** on 8 volta-class gpus down from the paper's **training time of 1 month**.
 
-![Sentiment Logits](./figures/fused_figure.png "Logit distribution for sentiment clusters")
+A byte-level (char-level) recurrent language model ([multiplicative LSTM](https://arxiv.org/abs/1609.07959)) for unsupervised modeling of large text datasets, such as the [amazon-review dataset](http://jmcauley.ucsd.edu/data/amazon/), is implemented in PyTorch. 
 
-For a detailed introduction into character-level language modeling with recurrent networks, we encourage looking at the original [char-rnn](https://github.com/karpathy/char-rnn) repository.
+The learned language model can be transferred to other natural language tasks where it is used to featurize text samples. The featurizations provide a strong initialization point for discriminative language tasks, and allow for **competitive task performance given only a few labeled samples**. To illustrate this the model is transferred to the [Binary Stanford Sentiment Treebank task](https://nlp.stanford.edu/sentiment/treebank.html).
 
-### Motivation
-The success of Deep Learning is not enjoyed to the same extent in the domain of Natural Language Processing (NLP). This is in part due to the supervised nature of other DL tasks, while creating NLP datasets for supervised learning is limited in scope to a few domains such as NMT, tree parsing, and sentiment analysis to name a few. In our experience creating large labeled language datasets has proven difficult due to the fact that labeling natural language data requires labelers with high degrees of reading comprehension as opposed to being able to classify images/draw bounding boxes for Computer Vision tasks. 
+![main performance fig](./figures/reproduction_graph.png "Reconstruction and Transfer performance")
 
-Given this bottleneck we see robust unsupervised learning regimes for natural language as an exciting new research avenue in order to mitigate the dependence on labeled data needed for language tasks. 
+The model's performance as a whole will increase as it processes more data. However, as is discovered early on in the training process, transferring the model to sentiment classification via Logistic Regression with **an L1 penalty leads to the emergence of one neuron (feature) that correlates strongly with sentiment**.
 
-We focus on the domain of sentiment analysis as it both
- * has a large corpus of research, datasets, and benchmarks
- * is a discriminitive classification task that can benefit from robust featurizations of text (which can be provided by an unsupervised language model)
+This sentiment neuron can be used to accurately and robustly discriminate between postive and negative sentiment given the single feature. A decision boundary of 0 is able to split the distribution of the neuron features into (relatively) distinct positive and negative sentiment clusters. 
 
-## Scalability
-Training a model on an amazon-review-sized dataset is a significant time investment. In order to improve our ability to iterate on experiments we found it imperative early on to investigate the scalability of data parallelism in PyTorch.
+![main neuron fig](./figures/highlighted_final_vals.png "Feature weights and Sentiment Logits")
 
-Our final model was trained using a batch size of 128 on 8 Volta-class gpus.
+Samples from the tails of the feature distribution correlate strongly with positive/negative sentiment.
 
-### Learning Rate Scaling
-We take queues from recent work in training imagenet at scale and leverage [FAIR's (Goyal et. al 2017)](https://arxiv.org/pdf/1706.02677.pdf) linear scaling rule. To account for our 4x batch size increase and 2x gpu increase we used a learning rate of `5e-4 * 8 -> 4e-3`.
+![Extreme samples](./figures/extremes.png "Activation heatmap for extreme sentiment samples")
 
-At this time we have not taken advantage of the other proposed techniques that worked well in our literature review
+## Analysis Content
+ * [Why Unsupervised Language Modeling?](./analysis/unsupervised.md)
+   * [Difficulties of Supervised Natural Language](./analysis/unsupervised.md#difficulties-of-supervised-natural-language)
+   * [Data Robustness](./analysis/unsupervised.md#data-robustness)
+   * [Model/Optimization Robustness](./analysis/unsupervised.md#modeloptimization-robustness)
+ * [Reproducing Results](./analysis/reproduction.md)
+   * [Training](./analysis/reproduction.md#training)
+     * [Training Setup](./analysis/reproduction.md#training-set-up)
+   * [Transfer](./analysis/reproduction.md#transfer)
+ * [Data Parallel Scalability](./analysis/scale.md)
+   * [PyTorch + GIL](./analysis/scale.md#pytorch-gil)
+ * [Open Questions](./analysis/questions.md)
 
-### (Distributed)DataParallel scaling
-Our investigation unfortunately held up fears from the PyTorch community about the abysmall performance of data parallelism with recurrent networks. Pytorch's vanilla DataParallelism wrapper produces next to no speedup for recurrent architectures due to issues related to the python Global Interpretter Lock. 
-
-All the parallel python threads involved in PyTorch's DataParallelism use the same c-backed data structure to aggregate gradients in and run tensor ops with. In order to ensure thread-safe execution the python threads compete for a global lock needed to interpret python commands that run the computation grpah on the GPU. This is problematic for recurrent architectures, where there are numerous of the same operation to call, each requiring only a little computation (as opposed to the heftier operations characteristic of image-processing models). In recurrent architectures no speedup will be observed as each thread spends a significant portion of time either passing this lock around or waiting for it.
-
-Distributed Data Parallel was fortunately not plagued by the same lock problems. Distributed Data Parallel starts a separate process for each model replica and communicates gradient updates directly via all-reduce calls on the gpu for minimal latency. This allows for relatively linear scaling accounting for redundant data processing being done in each process, which we'll adress in future updates.
-
-![scaling graph](./figures/both_scalability.png "(Distributed) Data Parallelism Scalability")
-
-As you can see next to no speedup is observed when utilizing normal pytorch data parallelism.
-
-Additionally, we tried setting `torch.backends.cuda.benchmark=True`, but it provided no observable benefit to scalability either, and in fact slightly hurt performance due to its additional overhead. We have yet to analyze this in depth.
-
-## Open Questions
-The best research work often leaves the reader with more questions than it answers. Here's some of the questions we thought of while reproducing this work and are now working on as a result.
- * Waiting for long training runs to end can be frustrating. How can we improve the speed and scalability of our system without sacrificing convergence/performance?
- * Sentiment is more black and white than good/bad, it's much more nuanced and a result of multiple factors. What are the other significant neurons according to our sentiment classification weights detecting? What other discriminitive language tasks would these features do well on?
-   * More generally, what other tasks could unsupervised language modeling at scale be used for? Discriminative or not.
- * Our model learned sentiment because it was a relevant piece of information for reconstruction of product reviews, not because it was told to learn sentiment. In our case we even found that it actually learned negative sentiment. In an ideal scenario we would have the ability to supervise/force our model to learn/learn about a specific characteristic, such as author frustration.  
-   * Given a target transfer task, how can performance on that task be used to regularize what the model learns about language?  
- * The performance of the model on sentiment transfer seems to have a slight dependence on the most recently trained examples from our dataset. Due to this dependence on data, we'd ideally like to fine tune our model to a subset of data that is relevant to the task being transferred to. 
-   * With this in mind, given a specific subset of data, how can we fine-tune our language model to the specified data without losing the general language properties of the larger corpus?
+## ReadMe Contents
+ * [Setup](#setup)
+   * [Install](#install)
+   * [Pretrained Models](#pretrained-models)
+   * [Data Downloads](#data-downloads)
+ * [Usage](#usage)
+   * [Unsupervised Reconstruction](#unsupervised-reconstruction)
+     * [Reconstruction Flags](#reconstruction-flags)
+   * [Sentiment Transfer](#sentiment-transfer)
+     * [Transfer Flags](#transfer-flags)
+   * [Heatmap Visualization](#heatmap-visualization)
+     * [Visualization Flags](#visualization-flags)
+   * [Distributed Usage](#distributed-usage)
+ * [SentimentDiscovery Package](#sentimentdiscovery-package)
+   * [Modules](#modules)
+   * [Flags](#flags)
+ * [Acknowledgement](#acknowledgement)
+ * [Thanks](#thanks)
+ * [Analysis](./analysis/unsupervised.md)
 
 ## Setup
 ### Install
@@ -64,13 +67,18 @@ Install the sentiment_discovery package with `pip setup.py install` in order to 
  * unidecode
 
 ### Pretrained models
-Download our pretrained mlstm model via https://drive.google.com/open?id=1JxoMiVqPSb8liLlNRvyZYRObi0kOHwXM
+We've included our own trained mlstm/lstm models as well as OpenAI's mlstm model:
+ * [mlstm](https://drive.google.com/file/d/1rcZ42siSqpLlVx2LRR_xjD7uJA8twKEa/view?usp=sharing)
+ * [lstm](https://drive.google.com/open?id=123fJYmB7F0vfx-oejtA9rgmXk-k34yoH)
+ * [openai mlstm](https://drive.google.com/open?id=1k96ZwUq8PWoBffz1o-vxHfEVWryCQyHN)
 
 ### Data Downloads
-TODO
+We've included a link to a preprocessed version of the amazon review dataset. We've included links to both the full dataset, and a pre-sharded (into train/val/test) version meant for lazy evaluation that we used to generate our results.
+ * [full](https://drive.google.com/open?id=1_8dIhs5a53jAkXm3Q7hfMxUdBsUHeg5W)
+ * [lazy shards](https://drive.google.com/file/d/1ZK2mSBk253SG0oVestvjfp2gnMjIA71Z/view?usp=sharing)
 
 ## Usage
-In addition to providing easily reusable code of the core functionalities of this work in our `sentiment_discovery` package, we also provide scripts to perform the three main functionalities in the paper:
+In addition to providing easily reusable code of the core functionalities of this work in our `sentiment_discovery` package, we also provide scripts to perform the three main high-level functionalities in the paper:
  * unsupervised reconstruction/language modeling of a corpus of text
  * transfer of learned language model to perform sentiment analysis on a specified corpus
  * heatmap visualization of sentiment in a body of text, and conversely generating text according to a fixed sentiment
@@ -78,7 +86,7 @@ In addition to providing easily reusable code of the core functionalities of thi
 Script results will be saved/logged to the `<experiment_dir>/<experiment_name>/*` directory hierarchy.
 
 ### Unsupervised Reconstruction
-Train a recurrent language model (mlstm/lstm) and saves it to the `<model_dir>/` directory in the above hierarchy. The metric histories will be available in the appropriate `<history>/` directory in the same hierarchy. In order to apply `weight_norm` only to lstm parameters as specified by the paper we use the `-lstm_only` flag.
+Train a recurrent language model (mlstm/lstm) and save it to the `<model_dir>/` directory in the above hierarchy. The metric histories will be available in the appropriate `<history>/` directory in the same hierarchy. In order to apply `weight_norm` only to lstm parameters as specified by the paper we use the `-lstm_only` flag.
 
 ```
 python text_reconstruction.py -experiment_dir ./experiments -experiment_name mlstm -model_dir model -cuda \
@@ -122,15 +130,15 @@ For a list of default values for all flags look at `./cfg/configure_text_reconst
  * `start_iter` - what iteration to start training at (used mainly for resuming linear learning rate scheduler)
 
 ### Sentiment Transfer
-This script parses sample text and binary sentiment labels from csv (or json) data files according to `-text_key`/`label_key`. The text is then featurized with the previously trained models by running the model over the text and extracting the cell (not hidden) state from the last timestep. The resulting featurizations are then used to fit an sklearn logistic regression model with an L1 penalty (using the validation data to select a regularization parameter).
+This script parses sample text and binary sentiment labels from csv (or json) data files according to `-text_key`/`label_key`. The text is then featurized and fit to a logistic regression model.
 
-The index of the resulting model weight with the greatest magnitude is then used as the index of the sentiment neuron. The relavent sentiment feature is extracted and then also fit to a logistic regression model in a similar manner.
+The index of the feature with the largest L1 penalty is then used as the index of the sentiment neuron. The relevant sentiment feature is extracted from the samples' features and then also fit to a logistic regression model to compare performance.
 
-Below is example output for running our trained model on the Binary Stanford Sentiment Treebank task.
+Below is example output for transfering our trained language model to the Binary Stanford Sentiment Treebank task.
 
 ```
 python3 sentiment_transfer.py -experiment_dir ./experiments -experiment_name mlstm -model_dir model -cuda \
--train binary_sst/train_binary_sent.csv -valid binary_sst/dev_binary_sent.csv -test binary_sst/test_binary_sent.csv \
+-train binary_sst/train.csv -valid binary_sst/val.csv -test binary_sst/test.csv \
 -text_key sentence -label_key label -load_model e0.pt 
 ```
 
@@ -148,29 +156,9 @@ neuron(s) 1285, 1503, 3986, 1228, 2301 are top sentiment neurons
 
 <!-- The resulting featurizations and original labels are then used to run sklearn's logistic regression on the data with an L1 penalty (we also perform cross-validation against the featurizations of the validation set to select a regularization parameter) to induce sparseness and isolate a "sentiment neuron" based on the neuron with the largest L1 penalty. After processing the data set with all the neurons the sentiment neurons are then used to predict the sentiment value as well. -->
 
-With the paper's model:
-
-```
-python3 sentiment_transfer.py -experiment_dir ./experiments -experiment_name mlstm_paper -model_dir model -cuda \
--train binary_sst/train_binary_sent.csv -valid binary_sst/dev_binary_sent.csv -test binary_sst/test_binary_sent.csv \
--text_key sentence -label_key label -load_model e0.pt 
-```
-
-```
-92.08/91.74/91.49 train/val/test accuracy w/ all_neurons
-00.12 regularization coef w/ all_neurons
-00107 features used w/ all neurons all_neurons
-neuron(s) 2388, 3159, 607, 2449, 2269 are top sentiment neurons
-86.17/86.01/85.61 train/val/test accuracy w/ n_neurons
-00.50 regularization coef w/ n_neurons
-00001 features used w/ all neurons n_neurons
-```
-
-![Paper weight visualization](./figures/paper_vals.png "Paper Weight Visualization")
-
 These results are saved to `./experiments/mlstm/binary_sst/e0/*`
 
-**Note** The other neurons are firing, and we can use these neurons in our prediction metrics by setting `-num_neurons` to the desired number of heavily penalized neurons. Even if this option is not enabled the logit visualizations/data are always saved for at least the top 5 neurons.
+**Note**: The other neurons are firing, and we can use these neurons in our prediction metrics by setting `-num_neurons` to the desired number of heavily penalized neurons. Even if this option is not enabled the logit visualizations/data are always saved for at least the top 5 neurons.
 
 #### Transfer Flags
 For a list of default values for all involved flags look at `./cfg/configure_sentiment_transfer.py`
@@ -181,7 +169,7 @@ For a list of default values for all involved flags look at `./cfg/configure_sen
 ### HeatMap Visualization
 This script takes a piece of text specified by `text` and then visualizes it via a karpathy-style heatmap based on the activations of the specified `neuron`. In order to find the neuron to specify, find the index of the neuron with the largest l1 penalty based on the neuron weight visualizations from the previous section. 
 
-Without loss of generality we're going to go through this section first referring to the paper's neuron weights. For this set of weights the sentiment neuron can be found at neuron 2388.
+Without loss of generality we're going to go through this section first referring to OpenAI's neuron weights. For this set of weights the sentiment neuron can be found at neuron 2388.
 
 ![highlighted neuron](./figures/highlighted_neuron.png "Highlighted Sentiment Neuron")
 
@@ -189,8 +177,8 @@ Armed with this information we can use the script to analyze the following exerp
 
 ```
 python3 visualize.py -experiment_dir ./experiments -experiment_name mlstm_paper -model_dir model -cuda \
--neuron 2388 -load_model e0.pt -text "25 August 2003 League of Extraordinary Gentlemen: Sean Connery is \
-one of the all time greats and I have been a fan of his since the 1950's." 
+-text "25 August 2003 League of Extraordinary Gentlemen: Sean Connery is one of the all time greats \
+I have been a fan of his since the 1950's." -neuron 2388 -load_model e0.pt 
 ```
 
 ![sentiment heatmap](./figures/heat_review.png "Sentiment Heatmap")
@@ -199,8 +187,8 @@ However, not only does this script analyze text, but the user can also specify t
 
 ```
 python3 visualize.py -experiment_dir ./experiments -experiment_name mlstm_paper -model_dir model -cuda \
--neuron 2388 -load_model e0.pt -text "25 August 2003 League of Extraordinary Gentlemen: Sean Connery is \
-one of the all time greats and I have been a fan of his since the 1950's." -generate
+-text "25 August 2003 League of Extraordinary Gentlemen: Sean Connery is" \
+-neuron 2388 -load_model e0.pt -generate
 ```
 
 ![generated heatmap](./figures/heat_gen.png "Generated Sentiment Heatmap")
@@ -213,12 +201,12 @@ In addition to generating text, the user can also set the sentiment of the gener
 
 <!--Lastly, the unsupervised learning process is just that, unsupervised, we never told it to learn positive sentiment neuron. As this is the case we find that occassionally we learn a negative sentiment neuron instead (as seen below). If this is the case turn on the `-negate` flag when trying to generate any heatmap (generated or not).-->
 
-Throughout the course of this section we've detailed how to visualize sentiment heatmaps with the original model from the paper. However, a slightly different approach is needed if a negative sentiment model is learned, as is the case with our reproduction. Simply turn on the `-negate` flag in order to visualize heatmaps for negative sentiment models such as ours. This must be done regardless of whether text is being analyzed or generated. (**Note**: our neuron is 1285 not 2388 for this model).
+When training a sentiment neuron with this method, sometimes we learn a positive sentiment neuron, and sometimes a negative sentiment neuron. This doesn’t matter, except for when running the visualization. The `negate` flag improves the visualization of negative sentiment models, if you happen to learn one.
 
 ```
 python3 visualize.py -experiment_dir ./experiments -experiment_name mlstm -model_dir model -cuda \
--neuron 1285 -load_model e0.pt -text "25 August 2003 League of Extraordinary Gentlemen: Sean Connery is \
-one of the all time greats and I have been a fan of his since the 1950's." -generate
+-text "25 August 2003 League of Extraordinary Gentlemen: Sean Connery is" \
+-neuron 1285 -load_model e0.pt -generate -negate -overwrite +/-1
 ```
 
 ![negated neuron](./figures/heat_gen_negate_overwrite.png "Generated Negated Sentiment Heatmaps")
@@ -248,7 +236,7 @@ In order to utilize Data Parallelism during training time ensure that `-cuda` is
 
 Also make sure to scale the [learning rate](#learning-rate-scaling) as appropriate. Note how we went from `1.25e-4` -> `2.5e-4` learning rates when we doubled the number of gpus.
 
-## Package Modules/Flags
+## SentimentDiscovery Package 
 ### Modules
  * `sentiment_discovery`
    * `sentiment_discovery.modules`: implementation of multiplicative LSTM, stacked LSTM.
@@ -327,8 +315,15 @@ Also make sure to scale the [learning rate](#learning-rate-scaling) as appropria
  * `world_size`- number of distributed processes to run. Do not set. The scripts will automatically set it equal to `num_gpus` (one gpu per process).
  * `verbose` - 2 = enable stdout for all processes (including all the data parallel workers). 1 = enable stdout for master worker. 0 = disable all stdout
  * `seed` - random seed for pytorch random operations
+ 
+## Acknowledgement
+Thanks to @guillete for providing a lightweight pytorch [port](https://github.com/guillitte/pytorch-sentiment-neuron) of the original weights.
+
+This project uses the [amazon review dataset](http://jmcauley.ucsd.edu/data/amazon/) collected by J. M. Cauley
 
 ## Thanks
 Want to help out? Open up an issue with questions/suggestions or pull requests ranging from minor fixes to new functionality.
 
 **May your learning be Deep and Unsupervised.**
+
+## [Analysis ->](./analysis/unsupervised.md)
