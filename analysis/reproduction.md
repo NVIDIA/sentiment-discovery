@@ -4,7 +4,7 @@ Our reproduction achieved comparable results in both unsupervised reconstruction
 ![reproduction results graph](../figures/reproduction_graph.png "Reproduction metrics")
 
 ## Training 
-Contrary to OpenAI's results the **validation reconstruction loss is lower than the training loss**. 
+Contrary to results in the OpenAI work the validation reconstruction loss is lower than the training loss. 
 
 We hypothesize that this is due to selecting shards before shuffling the dataset, causing similar samples to end up in the same shard. Even though one shard amounts to `80 million/1002 ~ 80000` reviews, it's still not a representative slice (\< .1%) of the dataset, especially when some categories such as books dominate ~10% of total sample reviews. 
 
@@ -26,13 +26,13 @@ It took several cycles of trial and error to come up with a result comparable to
  * **Batch per gpu**: 128 (instead of OpenAI's 32).
  * **Hardware**: 8 volta-class gpus (instead of OpenAI's 4 pascal)
  * **Learning Rate Scaling**: We take queues from recent work in training imagenet at scale and leverage [FAIR's (Goyal et. al 2017)](https://arxiv.org/pdf/1706.02677.pdf) linear scaling rule. To account for our 4x batch size increase and 2x gpu increase we used a learning rate of `5e-4 * 8 -> 4e-3`.
- * **Processing Speed**: With our hardware and batch size we achieved a processing speed (wall-time) of **76k characters/second** compared to OpenAI's 12.5k ch/s
- * **Processing Time**: It took approximately **5 days to train** on the million samples of the paper and 6.5 days to train on a full epoch of the amazon dataset.
+ * **Processing Speed**: With our hardware and batch size we achieved a processing speed (wall-time) of 76k characters/second compared to OpenAI's 12.5k ch/s
+ * **Processing Time**: It took approximately 5 days to train on the million samples of the paper and 6.5 days to train on a full epoch of the amazon dataset.
 
 ## Transfer
 We chose to reproduce transfer results with the binary Stanford Sentiment Treebank as opposed to the IMDB dataset because of its smaller size, and faster turnaround time for experiments.
 
-Data samples are featurized by running a forward pass of the model over the data and extracting the **cell (not hidden) state** from the last token. 
+Data samples are featurized by running a forward pass of the model over the data and extracting the cell (not hidden) state from the last token. 
 
 These features are used for training a logistic regression model (via sklearn/PyTorch) against the samples' associated labels. We use classification performance on a hold out validation set to select an L1 regularization hyperparameter. 
 

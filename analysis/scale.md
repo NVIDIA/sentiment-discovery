@@ -3,7 +3,7 @@ Training a model on an amazon-review-sized dataset is a significant time investm
 
 ![scaling graph](../figures/both_scalability.png "(Distributed) Data Parallelism Scalability")
 
-Our investigation unfortunately held up fears from the PyTorch community about the abysmal performance of data parallelism with recurrent networks. **Pytorch's vanilla DataParallel wrapper produces little to no speedup for recurrent architectures** due to issues related to the python Global Interpreter Lock (GIL). 
+Our investigation unfortunately held up fears from the PyTorch community about the abysmal performance of data parallelism with recurrent networks. Pytorch's vanilla DataParallel wrapper produces little to no speedup for recurrent architectures due to issues related to the python Global Interpreter Lock (GIL). 
 
 DistributedDataParallel was fortunately not plagued by the same lock problems. DistributedDataParallel starts a separate process for each model replica and communicates gradient updates directly via all-reduce calls on the gpu for minimal latency. This allows for relatively linear scaling accounting for redundant data processing being done in each process, which will be adressed in future updates.
 

@@ -14,14 +14,14 @@ Transfering an unsupervised model to the domain of sentiment analysis is attract
  * has a relatively large corpus of research, datasets, and benchmarks to measure performance
  * is a simple discriminitive classification task that easily benefits from robust featurizations of text (provided by an unsupervised language model)
 
-Overall, language is hard and communicating with it effectively on a daily basis can elude even the best of us. Communicating language information to AI via labels is even more difficult. Given this bottleneck we see robust unsupervised learning regimes for natural language as an attractive research avenue in order to **mitigate tasks' dependences on large, labeled, datasets**.  
+Overall, language is hard and communicating with it effectively on a daily basis can elude even the best of us. Communicating language information to AI via labels is even more difficult. Given this bottleneck we see robust unsupervised learning regimes for natural language as an attractive research avenue in order to mitigate tasks' dependences on large, labeled, datasets.  
 
 ## Data Robustness 
 Utilization of byte-level recurrent models allows for learning directly on the binary values of the text (since one character is one byte/8 bits). This is advantageous for data collection and processing as it allows us to work with a wide range of text samples, such as these, without any tokenization and little data cleaning:
  
 ![Robustness examples](../figures/errors.png "Activation heatmap for erroneous sentiment samples")
  
-**No feature engineering has to be done at the data processing level** to determine how to handle:
+No feature engineering has to be done at the data processing level to determine how to handle:
  * **Capitalization**: We don't have to create distinct tokenizations between capitalized/uncaptilized words. 
  * **Misspelling**: It's robust to misspelings like GAME -> GMAE without having to clean it or making a unique token.
  * **Unknown entities**: Most importantly, perhaps, it's able to process unknown entities such as twitter handles, hashtags, links, and emojis. 

@@ -334,9 +334,12 @@ class csv_dataset(data.Dataset):
 		self.X = data[text_key].values.tolist()
 		if preprocess:
 			self.X = [preprocess_fn(s, maxlen=None, encode=None) for s in self.X]
-		self.Y = data[label_key].values
-		if binarize_sent:
-			self.Y = ((self.Y/np.max(self.Y)) > .5).astype(int)
+		if label_key in data:
+			self.Y = data[label_key].values
+			if binarize_sent:
+				self.Y = ((self.Y/np.max(self.Y)) > .5).astype(int)
+		else:
+			self.Y = np.ones(len(self.X))*-1
 
 	def __len__(self):
 		return len(self.X)
