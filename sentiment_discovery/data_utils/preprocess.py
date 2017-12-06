@@ -72,27 +72,3 @@ def _tokenize_str(string, char_tensor=None):
 	for i, char in enumerate(string):
 		char_tensor[i] = char
 	return char_tensor
-
-def tokenize_text_file(path, preprocess=True):
-	"""Tokenizes a text file to a signle axis ByteTensor."""
-	assert os.path.exists(path)
-	# Count bytes
-	with open(path, 'r') as f:
-		tokens = 0
-		for line in f:
-			tokens += len(line.encode())
-
-	# Tokenize file content
-	with open(path, 'r') as f:
-		ids = torch.ByteTensor(tokens)
-		token = 0
-		for _line in f:
-			if preprocess:
-				line = process_str(_line)
-			else:
-				line = line.encode()
-			for char in line:
-				ids[token] = char
-				token += 1
-
-	return ids

@@ -319,7 +319,7 @@ Also make sure to scale the [learning rate](#learning-rate-scaling) as appropria
  * [Open Questions](./analysis/questions.md)
 
 ## Acknowledgement
-Thanks to @guillete for providing a lightweight pytorch [port](https://github.com/guillitte/pytorch-sentiment-neuron) of the original weights.
+Thanks to @guillette for providing a lightweight pytorch [port](https://github.com/guillitte/pytorch-sentiment-neuron) of the original weights.
 
 This project uses the [amazon review dataset](http://jmcauley.ucsd.edu/data/amazon/) collected by J. McAuley
 
