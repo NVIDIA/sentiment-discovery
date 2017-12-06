@@ -169,7 +169,7 @@ class unsupervised_dataset(data.Dataset):
 			if self.data_file_type == 'json':
 				json.dump(ds.data, open(self.path, 'w'))
 			if self.data_file_type == 'csv':
-				ds.write(self.path)
+				ds.write(path=self.path)
 			else:
 				raise NotImplementedError('Support for file types other \
 					than json not implemented for unsupervised learning.')
