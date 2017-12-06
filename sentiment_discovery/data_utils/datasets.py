@@ -373,7 +373,7 @@ class csv_dataset(data.Dataset):
 					c.writerow(row)
 			else:
 				c.writerow([self.label_key, self.text_key])
-				for row in zip(self.X, self.Y):
+				for row in zip(self.Y, self.X):
 					c.writerow(row)
 
 class train_val_ds_wrapper(data.Dataset):

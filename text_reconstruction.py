@@ -22,7 +22,10 @@ from cfg import cfg, configure_usage
 def run_epoch(model, epoch, data2use, data_fn, num_batches, is_training=False,
 				_cfg=None, inner_lr=None, saver=None):
 	"""runs model over epoch of data, trains if necessary, and saves/returns model progress"""
-	print('entering training epoch %s'% (str(epoch),))
+	if is_training:
+		print('entering training epoch %s'% (str(epoch),))
+	else:
+		print('evaluating epoch %s'% (str(epoch),))
 	#handle config
 	if _cfg is not None:
 		config = _cfg
@@ -137,18 +140,15 @@ def main():
 			if opt.train != 'None':
 				_, history = run_epoch(model, e, text, train_fn, n_batch, is_training=not opt.should_test,
 										inner_lr=cfg.inner_lr, saver=lambda ext, x: saver('e'+str(e)+ext, x))
-				histories.append(history)
-				pkl.dump(histories, open(loss_file, 'wb'))
+				saver('e'+str(e)+'.pt',history)
 			if opt.valid != 'None':
 				_, val_history = run_epoch(model, e, valid, eval_fn, nv_batch, is_training=False)
-				logger.log_pkl(str(np.mean(val_histories)), 'val_history', 'e%s.pkl' % (e,), 'wb')
-				# pkl.dump(str(np.mean(val_history)), open(os.path.basename(save_file)+'.'+'val_loss.pkl', 'wb'))
 				val_histories.append(val_history)
+				logger.log_pkl(str(np.mean(val_histories)), 'val_history', 'e%s.pkl' % (e,), 'wb')
 			if opt.test != 'None':
 				_, test_history = run_epoch(model, e, test, eval_fn, nt_batch, is_training=False)
-				logger.log_pkl(str(np.mean(test_histories)), 'test_history', 'e%s.pkl' % (e,), 'wb')
-				# pkl.dump(str(np.mean(test_history)), open(os.path.basename(save_file)+'.'+'test_loss.pkl', 'wb'))
 				test_histories.append(test_history)
+				logger.log_pkl(str(np.mean(test_histories)), 'test_history', 'e%s.pkl' % (e,), 'wb')
 
 			#save progress
 			saver('e'+str(e), history)
@@ -159,7 +159,7 @@ def main():
 			e += 1
 
 		except Exception as ex:
-			saver('e'+str(e), history)
+			saver('e'+str(e)+'.pt', history)
 			print('Exiting from training early')
 			raise ex
 			exit()

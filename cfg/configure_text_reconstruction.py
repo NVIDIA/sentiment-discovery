@@ -55,8 +55,8 @@ def make_saver(cfg, opt):
 	cfg.histories = []
 	if cfg.chkpt is not None and 'histories' in cfg.chkpt:
 		cfg.histories = cfg.chkpt['histories']
-	def _saver(basename, history, end_epoch=False, e=None):
-		epoch = e if e is not None else cfg.e
+	def _saver(basename, history):
+		epoch = cfg.e
 		if len(cfg.histories) <= epoch:
 			cfg.histories.append(history)
 		else:
@@ -70,7 +70,7 @@ def make_saver(cfg, opt):
 						'histories': cfg.histories
 					}
 			save(cfg.model, os.path.join(cfg.logger.get_log_dir(opt.model_dir), basename), save_dict=checkpoint)
-			cfg.logger.log_pkl(cfg.histories, 'histories', basename, 'wb')
+			cfg.logger.log_pkl(cfg.histories, 'histories', os.path.splitext(basename)[0]+'.pkl', 'wb')
 	return _saver
 
 def num_batches(loader, cfg, opt):

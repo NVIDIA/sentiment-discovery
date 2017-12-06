@@ -20,7 +20,8 @@ def epoch_loop(model, data_iter, data_fn, persist=False, skip_rule=None, inner_l
 		done = False
 		if not skip:
 			#persist state for forward propagation of info
-			model.persist_state(hidden)
+			if persist:
+				model.persist_state(hidden)
 			#perform gradient update/lr decay
 			if model.is_training:
 				model.optim_step()
