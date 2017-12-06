@@ -2,7 +2,7 @@ import os
 
 from .samplers import BatchSampler, DistributedBatchSampler, TransposedSampler
 from .loaders import DataLoader
-from .preprocess import process_str, tokenize_str_batch, tokenize_text_file
+from .preprocess import process_str, tokenize_str_batch
 from .datasets import unsupervised_dataset, json_dataset, csv_dataset, split_ds
 from .cache import array_cache
 from .lazy_loader import exists_lazy, make_lazy, lazy_array_loader
