@@ -162,7 +162,7 @@ def script_config(parser):
 
 	# dataset path flags
 	parser.set_defaults(train='./data/imdb/total.json')
-	parser.set_defaults(split=1.)
+	parser.set_defaults(split='1.')
 	parser.set_defaults(valid='None')
 	parser.set_defaults(test='None')
 

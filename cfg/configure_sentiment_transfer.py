@@ -29,7 +29,6 @@ def script_config(parser):
 	parser.set_defaults(model_dir='model')
 	parser.set_defaults(load_model='')
 
-
 	# data flags
 	# increased batch size
 	parser.set_defaults(batch_size=128)
@@ -61,7 +60,7 @@ def script_config(parser):
 	# dataset path flags
 	# set datasets
 	parser.set_defaults(train='./data/binary_sst/train_binary_sent.csv')
-	parser.set_defaults(split=1.)
+	parser.set_defaults(split='1.')
 	parser.set_defaults(valid='./data/binary_sst/dev_binary_sent.csv')
 	parser.set_defaults(test='./data/binary_sst/test_binary_sent.csv')
 

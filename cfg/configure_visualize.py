@@ -66,7 +66,7 @@ def script_config(parser):
 	# dataset path flags
 	# set no datasets
 	parser.set_defaults(train='None')
-	parser.set_defaults(split=1.)
+	parser.set_defaults(split='1.')
 	parser.set_defaults(valid='None')
 	parser.set_defaults(test='None')
 

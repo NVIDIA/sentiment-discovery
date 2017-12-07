@@ -90,7 +90,8 @@ def get_split(cfg, opt):
 		splits[1] = 0.
 	if opt.test != 'None':
 		splits[2] = 0.
-	return splits/sum(splits)
+	final_sum = sum(splits)
+	return [s/final_sum for s in splits]
 
 def configure_data(parser):
 	"""add cmdline flags for configuring datasets"""
