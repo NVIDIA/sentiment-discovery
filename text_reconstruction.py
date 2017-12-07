@@ -144,11 +144,11 @@ def main():
 			if opt.valid != 'None':
 				_, val_history = run_epoch(model, e, valid, eval_fn, nv_batch, is_training=False)
 				val_histories.append(val_history)
-				logger.log_pkl(str(np.mean(val_histories)), 'val_history', 'e%s.pkl' % (e,), 'wb')
+				logger.log_pkl(val_histories, 'val_history', 'e%s.pkl' % (e,), 'wb')
 			if opt.test != 'None':
 				_, test_history = run_epoch(model, e, test, eval_fn, nt_batch, is_training=False)
 				test_histories.append(test_history)
-				logger.log_pkl(str(np.mean(test_histories)), 'test_history', 'e%s.pkl' % (e,), 'wb')
+				logger.log_pkl(test_histories, 'test_history', 'e%s.pkl' % (e,), 'wb')
 
 			#save progress
 			saver('e'+str(e), history)
