@@ -137,7 +137,7 @@ class TransposedSampler(data.sampler.Sampler):
 		return iter(map(self.transpose_helper, iter(self.data_sampler)))
 
 	def __len__(self):
-		return max(self.len_ds,1)
+		return self.len_ds
 
 # class ShardedSampler(data.sampler.Sampler):
 # 	def __init__(self,data_source,batch_size,data_sampler=None,num_shards=1000):

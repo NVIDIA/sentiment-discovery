@@ -98,7 +98,7 @@ python text_reconstruction.py -experiment_dir ./experiments -experiment_name mls
 
 The training process takes in a json list (or csv) file as a dataset where each entry has key (or column) `text_key` containing samples of text to model.
 
-The unsupervised dataset will proportionally take 1002 (1000 train) shards from the training, validation, and test sets.
+The unsupervised dataset will proportionally take 1002 (1000 train) shards from the training, validation, and test sets. Currently the same dataset must be used for all three.
 
 The dataset entries are [transposed](https://yagr.nvidia.com/ADLR/sentiment-os/blob/master/sentiment_discovery/data_utils/samplers.py#L114) to allow for the concatenation of sequences in order to persist hidden state across a shard in the training process.
 
@@ -238,6 +238,8 @@ In order to utilize Data Parallelism during training time ensure that `-cuda` is
 
 Also make sure to scale the [learning rate](#learning-rate-scaling) as appropriate. Note how we went from `1.25e-4` -> `2.5e-4` learning rates when we doubled the number of gpus.
 
+**Note:** validation and test datasets are currently not functioning properly for unsupervised reconstruction.
+
 ## SentimentDiscovery Package 
 ### Modules
  * `sentiment_discovery`
@@ -289,7 +291,7 @@ Also make sure to scale the [learning rate](#learning-rate-scaling) as appropria
 
 #### Dataset Path Flags
  * `train` - path to training set
- * `split` - float value in [0,1] range. If no validation set is specified then proportionally split training set into `split` and `1-split` training/validation sets
+ * `split` - comma-separated list of proportions for splitting the training set into training, validation, and test sets
  * `valid` - path to validation set
  * `test` - path to test set
 

@@ -376,7 +376,7 @@ class csv_dataset(data.Dataset):
 				for row in zip(self.Y, self.X):
 					c.writerow(row)
 
-class train_val_ds_wrapper(data.Dataset):
+class train_val_test_ds_wrapper(data.Dataset):
 	def __init__(self, ds, split_inds):
 		split_inds = list(split_inds)
 		self.X = itemgetter(*split_inds)(ds.X)
@@ -388,13 +388,23 @@ class train_val_ds_wrapper(data.Dataset):
 		processed = self.X[index]
 		return processed, int(self.Y[index]), len(processed)
 
-def split_ds(ds, split=.8):
-	"""randomly split a dataset into train/val given a percentage of how much to allocate to training"""
-	split_ = int(len(ds)*split)
-	inds = np.arange(len(ds))
+def split_ds(ds, split=[.8,.2,.0]):
+	"""randomly split a dataset into train/val/test given a percentage of how much to allocate to training"""
+	split = np.array(split)
+	split /= np.sum(split)
+	ds_len = len(ds)
+	inds = np.arange(ds_len)
 	np.random.shuffle(inds)
-	train_inds = inds[:split_]
-	val_inds = inds[split_:]
-	train_ds = train_val_ds_wrapper(ds, train_inds)
-	val_ds = train_val_ds_wrapper(ds, val_inds)
+	start_idx = 0
+	residual_idx = 0
+	rtn_ds = [None]*len(split)
+	for i, f in enumerate(split):
+		if f != 0:
+			proportion = ds_len*split[i]
+			residual_idx += proportion % 1
+			split_ = int(int(proportion) + residual_idx)
+			split_inds = inds[start_idx:start_idx+max(split_, 1)]
+			rtn_ds[i] = train_val_ds_wrapper(ds, split_inds)
+			start_idx += split_	
+			residual_idx %= 1
 	return train_ds, val_ds

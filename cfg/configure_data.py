@@ -39,32 +39,58 @@ def make_loaders(cfg, opt):
 	if opt.eval_label_key != 'None':
 		eval_set_args['label_key'] = opt.eval_label_key
 
-
 	train = None
+	valid = None
+	test = None
+
 	if opt.train != 'None':
 		train = data_utils.make_dataset(**data_set_args)
 
-	if opt.split < 1. and train is not None:
-		train, valid = data_utils.split_ds(train, opt.split)
-	else:
-		valid = None
-		if opt.valid != 'None':
-			eval_set_args['path'] = opt.valid
-			eval_set_args['dataset'] = 'val'
-			valid = data_utils.make_dataset(**eval_set_args)
+	cfg.split = get_split(cfg, opt)
+	if should_split(cfg.split) and train is not None:
+		train, valid, test = data_utils.split_ds(train, cfg.split)
+
+	if valid is None and opt.valid != 'None':
+		eval_set_args['path'] = opt.valid
+		eval_set_args['dataset'] = 'val'
+		valid = data_utils.make_dataset(**eval_set_args)
+	if test is None and opt.test != 'None':
+		eval_set_args['path'] = opt.test
+		eval_set_args['dataset'] = 'test'
+		test = data_utils.make_dataset(**eval_set_args)
+
 	if train is not None:
 		train = data_utils.DataLoader(train, **data_loader_args)
 	if opt.eval_batch_size != 0:
 		data_loader_args['batch_size'] = opt.eval_batch_size
 	if valid is not None:
 		valid = data_utils.DataLoader(valid, **eval_loader_args)
-	test = None
-	if opt.test != 'None':
-		eval_set_args['path'] = opt.test
-		eval_set_args['dataset'] = 'test'
-		test = data_utils.make_dataset(**eval_set_args)
+	if test is not None:
 		test = data_utils.DataLoader(test, **eval_loader_args)
 	return train, valid, test
+
+def should_split(split):
+	return max(split) != 1.
+
+def get_split(cfg, opt):
+	splits = []
+	if opt.split.find(',') != -1: 
+		splits = [float(s) for s in opt.split.split(',')]
+	elif opt.split.find('/') != -1:
+		splits = [float(s) for s in opt.split.split('/')]
+	else:
+		splits = [float(opt.split)]
+	split_total = sum(splits)
+	if split_total < 1.:
+		splits.append(1-split_total)
+	while len(splits) < 3:
+		splits.append(0.)
+	splits = splits[:3]
+	if opt.valid != 'None':
+		splits[1] = 0.
+	if opt.test != 'None':
+		splits[2] = 0.
+	return splits/sum(splits)
 
 def configure_data(parser):
 	"""add cmdline flags for configuring datasets"""
@@ -96,8 +122,8 @@ def configure_data(parser):
 						help='delimiter used to parse csv testfiles')
 	parser.add_argument('-binarize_sent', action='store_true',
 						help='binarize sentiment values to 0 or 1 if they\'re on a different scale')
-	parser.add_argument('-split', type=float, default=1.,
-						help='proportions for training and validation split')
+	parser.add_argument('-split', default='1.',
+						help='comma-separated list of proportions for training, validation, and test split')
 	parser.add_argument('-lazy', action='store_true',
 						help='whether to lazy evaluate ONLY the training data set')
 	parser.add_argument('-text_key', default='sentence',
