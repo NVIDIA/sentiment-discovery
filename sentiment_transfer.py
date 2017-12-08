@@ -200,10 +200,10 @@ if __name__ == '__main__':
 
 	trXt_sentiment = utils.get_neuron_features(trXt, top_neurons)
 	vaXt_sentiment = None
-	if opt.valid != 'None' or (opt.split < 1.):
+	if cfg.valid is not None:
 		vaXt_sentiment = utils.get_neuron_features(vaXt, top_neurons)
 	teXt_sentiment = None
-	if opt.test != 'None':
+	if cfg.test is not None:
 		teXt_sentiment = utils.get_neuron_features(teXt, top_neurons)
 
 	log_reg_model2, full_rep_accs, c, nnotzero = train_sklearn_logreg(

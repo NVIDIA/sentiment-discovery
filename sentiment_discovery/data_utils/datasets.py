@@ -98,7 +98,7 @@ class csv_dataset(data.Dataset):
 		self.drop_unlabeled = drop_unlabeled
 
 		load_path, should_process = get_load_path_and_should_process(self.path, text_key, label_key)
-		should_process = should_process or self.preprocess
+		should_process = should_process or preprocess
 
 		if drop_unlabeled:
 			data = pd.read_csv(load_path, sep=delim, usecols=['Sentiment', text_key, label_key],
@@ -172,7 +172,6 @@ class json_dataset(data.Dataset):
 	def __init__(self, path, preprocess=False, preprocess_fn=process_str, binarize_sent=False,
 				text_key='sentence', label_key='label', loose_json=False, **kwargs):
 		self.path = path
-		self.preprocess = preprocess
 		self.preprocess_fn = preprocess_fn
 		self.X = []
 		self.Y = []
@@ -181,7 +180,7 @@ class json_dataset(data.Dataset):
 		self.loose_json = loose_json
 
 		load_path, should_process = get_load_path_and_should_process(self.path, text_key, label_key)
-		should_process = should_process or self.preprocess
+		should_process = should_process or preprocess
 
 		for j in self.load_json_stream(load_path):
 			s = j[text_key]
