@@ -10,7 +10,7 @@ from torch.utils import data
 import pandas as pd
 import numpy as np
 
-from .preprocess import process_str
+from .preprocess import process_str, binarize_labels
 from .lazy_loader import lazy_array_loader, exists_lazy, make_lazy
 from .cache import array_cache
 
@@ -23,6 +23,258 @@ NUM_TRAIN_SHARDS = 1000
 NUM_VAL_SHARDS = 1
 NUM_TEST_SHARDS = 1
 NUM_SHARDS = NUM_TRAIN_SHARDS+NUM_VAL_SHARDS+NUM_TEST_SHARDS
+
+def get_processed_path(path, text_key='text', label_key='label'):
+	return path+'.%s.%s'%(text_key, label_key)
+
+def get_load_path_and_should_process(path, text_key='text', label_key='label'):
+	processed_path = get_processed_path(path, text_key, label_key)
+	exists = os.path.exists(processed_path)
+	if not exists:
+		return path, True
+	return processed_path, False
+
+def save_preprocessed(ds, text_key='text', label_key='label'):
+	if not torch.distributed._initialized or torch.distributed.get_rank() == 0:
+		ds.write(path=get_processed_path(ds.path, text_key, label_key))
+
+class train_val_test_wrapper(data.Dataset):
+	def __init__(self, ds, split_inds):
+		split_inds = list(split_inds)
+		self.X = itemgetter(*split_inds)(ds.X)
+		self.Y = np.array(itemgetter(*split_inds)(ds.Y))
+
+	def __len__(self):
+		return len(self.X)
+	def __getitem__(self, index):
+		processed = self.X[index]
+		return processed, int(self.Y[index]), len(processed)
+
+def split_ds(ds, split=[.8,.2,.0]):
+	"""randomly split a dataset into train/val/test given a percentage of how much to allocate to training"""
+	split = np.array(split)
+	split /= np.sum(split)
+	ds_len = len(ds)
+	inds = np.arange(ds_len)
+	np.random.shuffle(inds)
+	start_idx = 0
+	residual_idx = 0
+	rtn_ds = [None]*len(split)
+	for i, f in enumerate(split):
+		if f != 0:
+			proportion = ds_len*split[i]
+			residual_idx += proportion % 1
+			split_ = int(int(proportion) + residual_idx)
+			split_inds = inds[start_idx:start_idx+max(split_, 1)]
+			rtn_ds[i] = train_val_test_wrapper(ds, split_inds)
+			start_idx += split_	
+			residual_idx %= 1
+	return rtn_ds
+
+class csv_dataset(data.Dataset):
+	"""
+	class for loading dataset for sentiment transfer
+	Args:
+		path (str): path to csv file with dataset.
+		preprocess_fn (callable): callable function that process a string into desired format.
+			Takes string, maxlen=None, encode=None as arguments. Default: process_str
+		delim (str): delimiter for csv. Default: False
+		binarize_sent (bool): binarize sentiment values to 0 or 1 if they\'re on a different scale. Default: False
+		drop_unlabeled (bool): drop rows with unlabelled sentiment values. Always fills remaining empty
+			columns with 0 (regardless if rows are dropped based on sentiment value) Default: False
+		text_key (str): key to get text from json dictionary. Default: 'sentence'
+		label_key (str): key to get label from json dictionary. Default: 'label'
+	Attributes:
+		X (list): all strings from the csv file
+		Y (np.ndarray): labels to train against
+	"""
+	def __init__(self, path, preprocess=False, preprocess_fn=process_str, delim=',',
+				binarize_sent=False, drop_unlabeled=False, text_key='sentence', label_key='label',
+				**kwargs):
+		self.path = path
+		self.delim = delim
+		self.text_key = text_key
+		self.label_key = label_key
+		self.drop_unlabeled = drop_unlabeled
+
+		load_path, should_process = get_load_path_and_should_process(self.path, text_key, label_key)
+		should_process = should_process or self.preprocess
+
+		if drop_unlabeled:
+			data = pd.read_csv(load_path, sep=delim, usecols=['Sentiment', text_key, label_key],
+				encoding='unicode_escape')
+			self.Sentiment = data['Sentiment'].values
+			data = data.dropna(axis=0, subset=['Sentiment'])
+		else:
+			data = pd.read_csv(load_path, sep=delim, usecols=[text_key, label_key])
+
+		data = data.fillna(value=-1)
+
+		self.X = data[text_key].values.tolist()
+		if should_process:
+			self.X = [preprocess_fn(s, maxlen=None, encode=None) for s in self.X]
+		if label_key in data:
+			self.Y = data[label_key].values
+		else:
+			self.Y = np.ones(len(self.X))*-1
+
+		if should_process:
+			save_preprocessed(self, text_key=text_key, label_key=label_key)
+
+		if binarize_sent:
+			self.Y = binarize_labels(self.Y, hard=binarize_sent)
+
+	def __len__(self):
+		return len(self.X)
+
+	def __getitem__(self, index):
+		"""process string and return string,label,and stringlen"""
+		x = self.X[index]
+		y = self.Y[index]
+		return x, int(y), len(x)
+
+	def write(self, writer_gen=None, path=None, skip_header=False):
+		"""
+		given a generator of metrics for each of the data points X_i,
+			write the metrics, text, and labels to a csv file
+		"""
+		if path is None:
+			path = self.path+'.results'
+		with open(path, 'w') as csvfile:
+			c = csv.writer(csvfile, delimiter=self.delim)
+			if writer_gen is not None:
+				#if first item of generator is a header of what the metrics mean then write header to csv file
+				if not skip_header:
+					header = (self.label_key,)+tuple(next(writer_gen))+(self.text_key,)
+					c.writerow(header)
+				for i, row in enumerate(writer_gen):
+					row = (self.Y[i],)+tuple(row)+(self.X[i],)
+					c.writerow(row)
+			else:
+				c.writerow([self.label_key, self.text_key])
+				for row in zip(self.Y, self.X):
+					c.writerow(row)
+
+class json_dataset(data.Dataset):
+	"""
+	class for loading a dataset from a json dump
+	Args:
+		path (str): path to json file with dataset.
+		preprocess (bool): whether to call preprocess_fn on strings in dataset. Default: False
+		preprocess_fn (callable): callable function that process a string into desired format.
+			Takes string, maxlen=None, encode=None as arguments. Default: process_str
+		text_key (str): key to get text from json dictionary. Default: 'sentence'
+		label_key (str): key to get label from json dictionary. Default: 'label'
+	Attributes:
+		all_strs (list): list of all strings from the dataset
+		all_labels (list): list of all labels from the dataset (if they have it)
+	"""
+	def __init__(self, path, preprocess=False, preprocess_fn=process_str, binarize_sent=False,
+				text_key='sentence', label_key='label', loose_json=False, **kwargs):
+		self.path = path
+		self.preprocess = preprocess
+		self.preprocess_fn = preprocess_fn
+		self.X = []
+		self.Y = []
+		self.text_key = text_key
+		self.label_key = label_key
+		self.loose_json = loose_json
+
+		load_path, should_process = get_load_path_and_should_process(self.path, text_key, label_key)
+		should_process = should_process or self.preprocess
+
+		for j in self.load_json_stream(load_path):
+			s = j[text_key]
+			if should_process:
+				s = self.preprocess_fn(s, maxlen=None, encode=None)
+				j[text_key] = s
+			self.X.append(s)
+			self.Y.append(j[label_key])
+
+		if should_process:
+			save_preprocessed(self, text_key=text_key, label_key=label_key)
+		if binarize_sent:
+			self.Y = binarize_labels(self.Y, hard=binarize_sent)
+
+	def __getitem__(self, index):
+		"""gets the index'th string from the dataset"""
+		x = self.X[index]
+		y = self.Y[index]
+		return self.X[index], y, len(x)
+
+	def __len__(self):
+		return len(self.X)
+
+	def write(self, writer_gen=None, path=None, skip_header=False):
+		"""
+		given a generator of metrics for each of the data points X_i,
+			write the metrics, text, and labels to a json file
+		"""
+		if path is None:
+			path = self.path+'.results'
+
+		jsons = []
+
+		if writer_gen is not None:
+			#if first item of generator is a header of what the metrics mean then write header to csv file
+			def gen_helper():
+				keys = {}
+				keys[0] = self.label_key
+				if not skip_header:
+					for idx, k in enumerate(tuple(next(writer_gen))):
+						keys[idx+1] = k
+				for i, row in enumerate(writer_gen):
+					if i == 0 and skip_header:
+						for idx, _ in enumerate(row):
+							keys[idx+1] = 'metric_%d'%(idx,)
+					j = {}
+					for idx, v in enumerate((self.Y[i],)+tuple(row)):
+						k = keys[idx]
+						j[k] = v
+					yield j
+		else:
+			def gen_helper():
+				for y in self.Y:
+					j = {}
+					j[self.label_key] = y
+					yield j
+
+		def out_stream():
+			for i, j in enumerate(gen_helper()):
+				j[self.text_key] = self.X[i]
+				yield j
+
+		self.save_json_stream(path, out_stream())
+
+	def save_json_stream(self, save_path, json_stream):
+		if self.loose_json:
+			with open(save_path, 'w') as f:
+				for i, j in enumerate(json_stream):
+					write_string = ''
+					if i != 0:
+						write_string = '\n'
+					write_string += json.dumps(j)
+					f.write(write_string)
+		else:
+			jsons = [j for j in json_stream]
+			json.dump(jsons, open(save_path, 'w'), separators=(',', ':'))
+
+	def load_json_stream(self, load_path):
+		if not self.loose_json:
+			jsons = json.load(open(load_path, 'r'))
+			generator = iter(jsons)
+		else:
+			def gen_helper():
+				with open(load_path, 'r') as f:
+					for row in f:
+						yield json.loads(row)
+			generator = gen_helper()
+
+		for j in generator:
+			if self.label_key not in j:
+				j[self.label_key] = -1
+			yield j
+
 
 def get_shard_indices(strs, shard_type='train'):
 	"""get indices of shard starts for the strings"""
@@ -167,7 +419,7 @@ class unsupervised_dataset(data.Dataset):
 			if not self.unprocessed_exists():
 				os.rename(self.path, self.path+'.original')
 			if self.data_file_type == 'json':
-				json.dump(ds.data, open(self.path, 'w'))
+				ds.write(path=self.path)
 			if self.data_file_type == 'csv':
 				ds.write(path=self.path)
 			else:
@@ -251,160 +503,3 @@ class unsupervised_dataset(data.Dataset):
 		else:
 			rtn_mask = [1]*(len(string))
 		return rtn_mask
-
-
-class json_dataset(data.Dataset):
-	"""
-	class for loading a dataset from a json dump
-	Args:
-		path (str): path to json file with dataset.
-		preprocess (bool): whether to call preprocess_fn on strings in dataset. Default: False
-		preprocess_fn (callable): callable function that process a string into desired format.
-			Takes string, maxlen=None, encode=None as arguments. Default: process_str
-		text_key (str): key to get text from json dictionary. Default: 'sentence'
-		label_key (str): key to get label from json dictionary. Default: 'label'
-	Attributes:
-		all_strs (list): list of all strings from the dataset
-		all_labels (list): list of all labels from the dataset (if they have it)
-	"""
-	def __init__(self, path, preprocess=False, preprocess_fn=process_str,
-				text_key='sentence', label_key='label'):
-		self.path = path
-		self.preprocess = preprocess
-		self.preprocess_fn = preprocess_fn
-		jsons = json.load(open(path, 'r'))
-		self.X = []
-		self.Y = []
-		for j in jsons:
-			s = j[text_key]
-			if self.preprocess:
-				s = self.preprocess_fn(s, maxlen=None, encode=None)
-				j[text_key] = s
-			self.X.append(s)
-			if label_key in j:
-				self.Y.append(j[label_key])
-			else:
-				self.Y.append(-1)
-		self.data = jsons
-
-	def __getitem__(self, index):
-		"""gets the index'th string from the dataset"""
-		x = self.X[index]
-		y = self.Y[index] if (len(self.Y) == len(self.X)) else -1
-		return self.X[index], y, len(x)
-
-	def __len__(self):
-		return len(self.X)
-
-class csv_dataset(data.Dataset):
-	"""
-	class for loading dataset for sentiment transfer
-	Args:
-		path (str): path to csv file with dataset.
-		preprocess_fn (callable): callable function that process a string into desired format.
-			Takes string, maxlen=None, encode=None as arguments. Default: process_str
-		delim (str): delimiter for csv. Default: False
-		binarize_sent (bool): binarize sentiment values to 0 or 1 if they\'re on a different scale. Default: False
-		drop_unlabeled (bool): drop rows with unlabelled sentiment values. Always fills remaining empty
-			columns with 0 (regardless if rows are dropped based on sentiment value) Default: False
-		text_key (str): key to get text from json dictionary. Default: 'sentence'
-		label_key (str): key to get label from json dictionary. Default: 'label'
-	Attributes:
-		X (list): all strings from the csv file
-		Y (np.ndarray): labels to train against
-	"""
-	def __init__(self, path, preprocess=False, preprocess_fn=process_str, delim=',',
-				binarize_sent=False, drop_unlabeled=False, text_key='sentence', label_key='label'):
-		self.path = path
-		self.delim = delim
-		self.text_key = text_key
-		self.label_key = label_key
-		self.drop_unlabeled = drop_unlabeled
-
-		if drop_unlabeled:
-			data = pd.read_csv(path, sep=delim, usecols=['Sentiment', text_key, label_key],
-				encoding='unicode_escape')
-			self.Sentiment = data['Sentiment'].values
-			data = data.dropna(axis=0, subset=['Sentiment'])
-		else:
-			data = pd.read_csv(path, sep=delim, usecols=[text_key, label_key])
-
-		data = data.fillna(value=0)
-
-		self.X = data[text_key].values.tolist()
-		if preprocess:
-			self.X = [preprocess_fn(s, maxlen=None, encode=None) for s in self.X]
-		if label_key in data:
-			self.Y = data[label_key].values
-			if binarize_sent:
-				self.Y = ((self.Y/np.max(self.Y)) > .5).astype(int)
-		else:
-			self.Y = np.ones(len(self.X))*-1
-
-	def __len__(self):
-		return len(self.X)
-
-	def __getitem__(self, index):
-		"""process string and return string,label,and stringlen"""
-		x = self.X[index]
-		y = self.Y[index]
-		return x, int(y), len(x)
-
-	def write(self, writer_gen=None, path=None, skip_header=False):
-		"""
-		given a generator of metrics for each of the data points X_i, write the metrics, sentence,
-			and labels to a similarly named csv file
-		"""
-		if path is None:
-			path = self.path+'.results'
-		with open(path, 'w') as csvfile:
-			c = csv.writer(csvfile, delimiter=self.delim)
-			if writer_gen is not None:
-				#if first item of generator is a header of what the metrics mean then write header to csv file
-				if not skip_header:
-					header = tuple(next(writer_gen))
-					header = (self.label_key,)+header+(self.text_key,)
-					c.writerow(header)
-				for i, row in enumerate(writer_gen):
-					row = tuple(row)
-					if self.drop_unlabeled:
-						row = (self.Sentiment[i],)+row
-					row = (self.Y[i],)+row+(self.X[i],)
-					c.writerow(row)
-			else:
-				c.writerow([self.label_key, self.text_key])
-				for row in zip(self.Y, self.X):
-					c.writerow(row)
-
-class train_val_test_ds_wrapper(data.Dataset):
-	def __init__(self, ds, split_inds):
-		split_inds = list(split_inds)
-		self.X = itemgetter(*split_inds)(ds.X)
-		self.Y = np.array(itemgetter(*split_inds)(ds.Y))
-
-	def __len__(self):
-		return len(self.X)
-	def __getitem__(self, index):
-		processed = self.X[index]
-		return processed, int(self.Y[index]), len(processed)
-
-def split_ds(ds, split=[.8,.2,.0]):
-	"""randomly split a dataset into train/val/test given a percentage of how much to allocate to training"""
-	split = np.array(split)
-	split /= np.sum(split)
-	ds_len = len(ds)
-	inds = np.arange(ds_len)
-	np.random.shuffle(inds)
-	start_idx = 0
-	residual_idx = 0
-	rtn_ds = [None]*len(split)
-	for i, f in enumerate(split):
-		if f != 0:
-			proportion = ds_len*split[i]
-			residual_idx += proportion % 1
-			split_ = int(int(proportion) + residual_idx)
-			split_inds = inds[start_idx:start_idx+max(split_, 1)]
-			rtn_ds[i] = train_val_ds_wrapper(ds, split_inds)
-			start_idx += split_	
-			residual_idx %= 1
-	return train_ds, val_ds

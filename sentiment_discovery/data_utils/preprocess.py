@@ -11,6 +11,18 @@ def clean_html(text):
 	"""remove html div tags"""
 	return re.sub(HTML_CLEANER_REGEX, ' ', text)
 
+def binarize_labels(labels, hard=True):
+	"""If hard, binarizes labels to values of 0 & 1. If soft thresholds labels to [0,1] range."""
+	labels = np.array(labels)
+	min_label = min(labels)
+	label_range = max(labels)-min_label
+	if label_range == 0:
+		return labels
+	labels = (labels-min_label)/label_range
+	if hard:
+		labels = (labels > .5).astype(int)
+	return labels
+
 def process_str(text, front_pad='\n ', end_pad=' ', maxlen=None, clean_markup=True,
 				clean_unicode=True, encode='utf-8'):
 	"""
