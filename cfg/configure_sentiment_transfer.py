@@ -59,10 +59,10 @@ def script_config(parser):
 
 	# dataset path flags
 	# set datasets
-	parser.set_defaults(train='./data/binary_sst/train_binary_sent.csv')
+	parser.set_defaults(train='./data/binary_sst/train.csv')
 	parser.set_defaults(split='1.')
-	parser.set_defaults(valid='./data/binary_sst/dev_binary_sent.csv')
-	parser.set_defaults(test='./data/binary_sst/test_binary_sent.csv')
+	parser.set_defaults(valid='./data/binary_sst/val.csv')
+	parser.set_defaults(test='./data/binary_sst/test.csv')
 
 	# device flags
 	parser.set_defaults(cuda=False)

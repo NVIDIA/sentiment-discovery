@@ -93,7 +93,7 @@ python text_reconstruction.py -experiment_dir ./experiments -experiment_name mls
 -embed_size 64 -rnn_size 4096 -layers 1 -weight_norm -lstm_only -rnn_type mlstm -dropout 0 -persist_state 1 \
 -seq_length 256 -batch_size 32 -lr 0.000125 --optimizer_type=Adam -lr_scheduler LinearLR -epochs 1  \
 -train data/amazon/reviews.json -valid data/amazon/reviews.json -test data/amazon/reviews.json \
--data_set_type unsupervised -lazy -text_key sentence 
+-data_set_type unsupervised -lazy -text_key sentence -eval_batch_size -1 -eval_seq_length -1
 ```
 
 The training process takes in a json list (or csv) file as a dataset where each entry has key (or column) `text_key` containing samples of text to model.
@@ -230,8 +230,7 @@ For a list of default values for all flags look at `./cfg/configure_visualizatio
 python text_reconstruction.py -experiment_dir ./experiments -experiment_name mlstm -model_dir model -cuda \
 -embed_size 64 -rnn_size 4096 -layers 1 -weight_norm -lstm_only -rnn_type mlstm -dropout 0 -persist_state 1 \
 -seq_length 256 -batch_size 32 -lr 0.00025 --optimizer_type=Adam -lr_scheduler LinearLR -epochs 1  \
--train data/amazon/reviews.json -valid data/amazon/reviews.json -test data/amazon/reviews.json \
--data_set_type unsupervised -lazy -text_key sentence -num_gpus 2 -distributed
+-train data/amazon/reviews.json -data_set_type unsupervised -lazy -text_key sentence -num_gpus 2 -distributed \
 ```
 
 In order to utilize Data Parallelism during training time ensure that `-cuda` is in use and that `-num_gpus` >1. As mentioned previously, vanilla DataParallelism produces no speedup for recurrent architectures. In order to circumvent this problem turn on the `-distributed` flag to utilize PyTorch's DistributedDataParallel instead and experience  speedup gains. 
