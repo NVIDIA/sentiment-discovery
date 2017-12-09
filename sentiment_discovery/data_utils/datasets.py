@@ -19,13 +19,9 @@ PERSIST_ALL = -1
 PERSIST_SHARD = 1
 RESET_STATE = 0
 
-NUM_TRAIN_SHARDS = 1000
-NUM_VAL_SHARDS = 1
-NUM_TEST_SHARDS = 1
-NUM_SHARDS = NUM_TRAIN_SHARDS+NUM_VAL_SHARDS+NUM_TEST_SHARDS
-
 def get_processed_path(path, text_key='text', label_key='label'):
-	return path+'.%s.%s'%(text_key, label_key)
+	filepath, ext = os.path.splitext(path)
+	return filepath+'.%s.%s'%(text_key, label_key)+ext
 
 def get_load_path_and_should_process(path, text_key='text', label_key='label'):
 	processed_path = get_processed_path(path, text_key, label_key)
@@ -35,12 +31,15 @@ def get_load_path_and_should_process(path, text_key='text', label_key='label'):
 	return processed_path, False
 
 def save_preprocessed(ds, text_key='text', label_key='label'):
+	processed_path = get_processed_path(ds.path, text_key, label_key)
 	if not torch.distributed._initialized or torch.distributed.get_rank() == 0:
-		ds.write(path=get_processed_path(ds.path, text_key, label_key))
+		ds.write(path=processed_path)
+	return processed_path
 
 class train_val_test_wrapper(data.Dataset):
 	def __init__(self, ds, split_inds):
-		split_inds = list(split_inds)
+		self.split_inds = list(split_inds)
+		self.wrapped_data = ds
 		self.X = itemgetter(*split_inds)(ds.X)
 		self.Y = np.array(itemgetter(*split_inds)(ds.Y))
 
@@ -50,13 +49,14 @@ class train_val_test_wrapper(data.Dataset):
 		processed = self.X[index]
 		return processed, int(self.Y[index]), len(processed)
 
-def split_ds(ds, split=[.8,.2,.0]):
+def split_ds(ds, split=[.8,.2,.0], shuffle=True):
 	"""randomly split a dataset into train/val/test given a percentage of how much to allocate to training"""
 	split = np.array(split)
 	split /= np.sum(split)
 	ds_len = len(ds)
 	inds = np.arange(ds_len)
-	np.random.shuffle(inds)
+	if shuffle:
+		np.random.shuffle(inds)
 	start_idx = 0
 	residual_idx = 0
 	rtn_ds = [None]*len(split)
@@ -91,6 +91,7 @@ class csv_dataset(data.Dataset):
 	def __init__(self, path, preprocess=False, preprocess_fn=process_str, delim=',',
 				binarize_sent=False, drop_unlabeled=False, text_key='sentence', label_key='label',
 				**kwargs):
+		self.processed_path = self.path = path
 		self.path = path
 		self.delim = delim
 		self.text_key = text_key
@@ -119,7 +120,9 @@ class csv_dataset(data.Dataset):
 			self.Y = np.ones(len(self.X))*-1
 
 		if should_process:
-			save_preprocessed(self, text_key=text_key, label_key=label_key)
+			self.processed_path = save_preprocessed(self, text_key=text_key, label_key=label_key)
+		else:
+			self.processed_path = load_path
 
 		if binarize_sent:
 			self.Y = binarize_labels(self.Y, hard=binarize_sent)
@@ -171,7 +174,7 @@ class json_dataset(data.Dataset):
 	"""
 	def __init__(self, path, preprocess=False, preprocess_fn=process_str, binarize_sent=False,
 				text_key='sentence', label_key='label', loose_json=False, **kwargs):
-		self.path = path
+		self.processed_path = self.path = path
 		self.preprocess_fn = preprocess_fn
 		self.X = []
 		self.Y = []
@@ -191,7 +194,10 @@ class json_dataset(data.Dataset):
 			self.Y.append(j[label_key])
 
 		if should_process:
-			save_preprocessed(self, text_key=text_key, label_key=label_key)
+			self.processed_path = save_preprocessed(self, text_key=text_key, label_key=label_key)
+		else:
+			self.processed_path = load_path
+
 		if binarize_sent:
 			self.Y = binarize_labels(self.Y, hard=binarize_sent)
 
@@ -274,65 +280,20 @@ class json_dataset(data.Dataset):
 				j[self.label_key] = -1
 			yield j
 
-
-def get_shard_indices(strs, shard_type='train'):
-	"""get indices of shard starts for the strings"""
-	num_shards = NUM_TEST_SHARDS
-	if shard_type == 'train':
-		num_shards = NUM_TRAIN_SHARDS
-	elif shard_type == 'val':
-		num_shards = NUM_VAL_SHARDS
+def get_shard_indices(strs, num_shards=1000):
 	shard_size = len(strs)//num_shards
 	inds = list(np.arange(num_shards)*shard_size)
 	return set(inds)
-
-def get_shard(strs, shard='train'):
-	"""gets portion of dataset corresponding to train/test/val/etc."""
-	if shard == 'train':
-		return train_shard(strs)
-	elif shard == 'val':
-		return val_shard(strs)
-	return test_shard(strs)
-
-def train_shard(strs):
-	"""gets training shards in dataset"""
-	num_strs = len(strs)
-	shard_size = num_strs//NUM_SHARDS
-	return strs[:NUM_TRAIN_SHARDS*shard_size]
-
-def val_shard(strs):
-	"""gets validation shards in dataset"""
-	num_strs = len(strs)
-	shard_size = num_strs//NUM_SHARDS
-	return strs[NUM_TRAIN_SHARDS*shard_size:(NUM_TRAIN_SHARDS+NUM_VAL_SHARDS)*shard_size]
-
-def test_shard(strs):
-	"""gets test shards in dataset"""
-	num_strs = len(strs)
-	shard_size = num_strs//NUM_SHARDS
-	return strs[(NUM_TRAIN_SHARDS+NUM_VAL_SHARDS)*shard_size:NUM_SHARDS*shard_size]
 
 class unsupervised_dataset(data.Dataset):
 	"""
 	class for loading dataset for unsupervised text reconstruction
 	Args:
-		path (str): path to json file with dataset.
+		path (str): instance of a dataset.
 		seq_len (int): path to json file with dataset.
-		preprocess (bool): whether to call preprocess_fn on strings in dataset. Default: False
-		preprocess_fn (callable): callable function that process a string into desired format.
-			Takes string, maxlen=None, encode=None as arguments. Default: process_str
-		use_cache (bool): whether or not to use an array_cache while loading the dataset.
-			Useful when using Transposed Sampling to avoid cache paging. Default: False
-		cache_block_size (int): number of strings to cache in one cache block. Default: 64
-		cache_size (int): number of caches blocks to store before removing (based on LRU removal). Default: 32
-		lazy (bool): whether to lazy evaluate dataset from disk or keep in memory. Default: False
-		mem_map (bool): whether to mem_map file of lazy evaluation. Default: False
 		persist_state (int): one of -1,0,1 specifying whether to never reset state,
 			reset after every sentence, or at end of every shard. Default: 0
-		shuffle (bool): whether to shuffle strings in dataset. Default: False
-		data_file_type (str): json is the only supported type of data set rn.
-		text_key (str): key to get text from json dictionary. Default: 'sentence'
-		label_key (str): key to get label from json dictionary. Default: 'label'
+		num_shards (int): number of shards to split dataset into.
 	Attributes:
 		all_strs (list): all strings from the data file
 		str_ends (list): cummulative lengths of `all_strs` if they were all concat'd to gether.
@@ -341,99 +302,24 @@ class unsupervised_dataset(data.Dataset):
 		num_strs (int): len(all_strs)
 		shard_starts (set): set containing indices of what strings
 	"""
-	def __init__(self, path, seq_len, preprocess=False, preprocess_fn=process_str, use_cache=False,
-				cache_block_size=64, cache_size=32, lazy=False, mem_map=False, persist_state=0,
-				shuffle=True, delim=',', text_key='sentence', label_key='label', shard_type='train'):
-		self.path = path
+	def __init__(self, ds, seq_len=256, persist_state=PERSIST_SHARD, num_shards=1002):
+		# self.path = path
 		self.persist_state = persist_state
-		self.lazy = lazy
+		# self.lazy = lazy
 		self.seq_len = seq_len
-		self.all_strs = []
-		self.str_ends = []
-		self.total_chars = 0
-		self.num_strs = 0
-		self.shuffle = shuffle
-		self.cache_block_size = cache_block_size
-		self.cache_size = cache_size
-		self.use_cache = use_cache
-		self.shard_type = shard_type
-
-		# no need to reprocess data if already processed while making training shards
-		if shard_type != 'train':
-			preprocess = not self.unprocessed_exists()
-
-		#if we need to preprocess dataset, if lazy version doesn't exist then load the dataset
-		if not self.lazy or not exists_lazy(self.path, self.shard_type) or preprocess:
-			print('making ds')
-			if os.path.splitext(path)[1] == '.json':
-				self.data_file_type = 'json'
-				ds = json_dataset(self.get_path(preprocess), preprocess, preprocess_fn, text_key, label_key)
-			elif os.path.splitext(path)[1] == '.csv':
-				self.data_file_type = 'csv'
-				ds = csv_dataset(self.get_path(preprocess), preprocess, preprocess_fn,
-								delim=delim, text_key=text_key, label_key=label_key)
-			else:
-				raise NotImplementedError('No support for other file types for unsupervised learning.')
-
+		if isinstance(ds, lazy_array_loader):
+			self.all_strs = ds
+			self.str_ends = ds.ends
+		else:
 			self.all_strs = ds.X
-			if preprocess:
-				self.save_processed(ds)
-			# get all datashards corresponding to training set
-			self.all_strs = get_shard(self.all_strs, self.shard_type)
-			#shuffle strings
-			if self.shuffle:
-				shuffle_inds = np.arange(len(self.all_strs))
-				np.random.shuffle(shuffle_inds)
-				self.all_strs = [self.all_strs[idx] for idx in shuffle_inds]
-			#get string endings
 			self.str_ends = list(accumulate(map(len, self.all_strs)))
-			self.total_chars = self.str_ends[-1]
-			self.num_strs = len(self.all_strs)
-			if self.lazy:
-				#make lazy evaluation file
-				make_lazy(self.path, self.all_strs, self.str_ends, self.shard_type)
-				#free memory after lazy
-				del self.all_strs
-				del self.str_ends
-
-		if self.lazy:
-			#make lazy loader from lazy evaluation file
-			self.all_strs = lazy_array_loader(path, self.shard_type, mem_map=mem_map)
-			self.str_ends = self.all_strs.ends
-			self.total_chars = self.str_ends[-1]
-			self.num_strs = len(self.str_ends)
-
+		self.total_chars = self.str_ends[-1]
+		self.num_strs = len(self.all_strs)
 		#get indices of shard starts for the strings
-		self.shard_starts = get_shard_indices(self.all_strs, self.shard_type)
-
-		if self.use_cache:
-			self.all_strs = array_cache(self.all_strs, self.cache_block_size, self.cache_size)
+		self.shard_starts = get_shard_indices(self.all_strs, num_shards)
 
 		if self.seq_len == -1:
 			self.seq_len = self.total_chars
-
-	def save_processed(self, ds):
-		"""save processed data so that we don't have to keep reprocessing it"""
-		if not torch.distributed._initialized or torch.distributed.get_rank() == 0:
-			if not self.unprocessed_exists():
-				os.rename(self.path, self.path+'.original')
-			if self.data_file_type == 'json':
-				ds.write(path=self.path)
-			if self.data_file_type == 'csv':
-				ds.write(path=self.path)
-			else:
-				raise NotImplementedError('Support for file types other \
-					than json not implemented for unsupervised learning.')
-
-	def get_path(self, preprocess=False):
-		"""get path of the unprocessed dataset"""
-		if preprocess and self.unprocessed_exists():
-			return self.path+'.original'
-		return self.path
-
-	def unprocessed_exists(self):
-		"""check if we've already saved a processed version of our dataset"""
-		return os.path.exists(self.path+'.original')
 
 	def __len__(self):
 		if self.seq_len == self.total_chars:

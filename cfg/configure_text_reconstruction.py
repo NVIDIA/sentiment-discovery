@@ -159,10 +159,11 @@ def script_config(parser):
 	parser.set_defaults(delim=',')
 	parser.set_defaults(drop_unlabeled=False)
 	parser.set_defaults(binarize_sent=False)
+	parser.set_defaults(num_shards=1002)
 
 	# dataset path flags
 	parser.set_defaults(train='./data/imdb/unsup.json')
-	parser.set_defaults(split='1.')
+	parser.set_defaults(split='1000,1,1')
 	parser.set_defaults(valid='None')
 	parser.set_defaults(test='None')
 

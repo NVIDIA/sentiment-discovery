@@ -9,6 +9,7 @@ class DataConfig(object):
 		self.parser = parser
 	def apply(self, cfg, opt):
 		print('configuring data')
+		cfg.split = get_split(cfg, opt)
 		train, valid, test = make_loaders(cfg, opt)
 		cfg.train = train
 		cfg.valid = valid
@@ -24,14 +25,15 @@ def make_loaders(cfg, opt):
 		'path': opt.train, 'seq_length': opt.seq_length, 'cache': opt.cache,
 		'text_key': opt.text_key, 'label_key': opt.label_key, 'lazy': opt.lazy,
 		'preprocess': opt.preprocess, 'persist_state': opt.persist_state,
-		'batch_size': opt.batch_size, 'delim': opt.delim, 'dataset': 'train',
-		'ds_type': opt.data_set_type}
+		'cache_size': opt.batch_size, 'delim': opt.delim, 'num_shards': opt.num_shards,
+		'ds_type': opt.data_set_type, 'split': cfg.split}
 	eval_loader_args = copy.copy(data_loader_args)
 	eval_set_args = copy.copy(data_set_args)
+	eval_set_args['split']=[1.]
 	# if optional eval args were set then replace their equivalent values in the arg dict
 	if opt.eval_batch_size != 0:
 		eval_loader_args['batch_size'] = opt.eval_batch_size
-		eval_set_args['batch_size'] = opt.eval_batch_size
+		eval_set_args['cache_size'] = opt.eval_batch_size
 	if opt.eval_seq_length != 0:
 		eval_set_args['seq_length'] = opt.eval_seq_length
 	if opt.eval_text_key != 'None':
@@ -45,18 +47,14 @@ def make_loaders(cfg, opt):
 
 	if opt.train != 'None':
 		train = data_utils.make_dataset(**data_set_args)
-
-	cfg.split = get_split(cfg, opt)
-	if should_split(cfg.split) and train is not None:
-		train, valid, test = data_utils.split_ds(train, cfg.split)
+		if should_split(cfg.split):
+			train, valid, test = train
 
 	if valid is None and opt.valid != 'None':
 		eval_set_args['path'] = opt.valid
-		eval_set_args['dataset'] = 'val'
 		valid = data_utils.make_dataset(**eval_set_args)
 	if test is None and opt.test != 'None':
 		eval_set_args['path'] = opt.test
-		eval_set_args['dataset'] = 'test'
 		test = data_utils.make_dataset(**eval_set_args)
 
 	if train is not None:
@@ -112,7 +110,10 @@ def configure_data(parser):
 	parser.add_argument('-data_size', type=int, default=256,
 						help='input dimension of each timestep of data')
 	parser.add_argument('-data_set_type', default='unsupervised',
-						help='what type of dataset to pull from. one of [unsupervised,csv,json]')
+						help='what type of dataset to model. one of [unsupervised,supervised]')
+	parser.add_argument('-num_shards', type=int, default=1002,
+						help="""number of total shards for unsupervised dataset. If a `split` is specified,
+								appropriately portions the number of shards amongst the splits.""")
 	parser.add_argument('-transpose', action='store_true',
 						help='use transposed sampling instead of default sampler for unshuffled sampling.')
 	parser.add_argument('-preprocess', action='store_true',

@@ -45,7 +45,7 @@ def script_config(parser):
 	parser.set_defaults(data_size=256)
 	parser.set_defaults(seq_length=256)
 	parser.set_defaults(eval_seq_length=0)
-	parser.set_defaults(data_set_type='csv')
+	parser.set_defaults(data_set_type='supervised')
 	parser.set_defaults(persist_state=0)
 	parser.set_defaults(transpose=True)
 	parser.set_defaults(no_wrap=False)
@@ -62,6 +62,7 @@ def script_config(parser):
 	parser.set_defaults(delim=',')
 	parser.set_defaults(drop_unlabeled=False)
 	parser.set_defaults(binarize_sent=False)
+	parser.set_defaults(num_shards=1)
 
 	# dataset path flags
 	# set no datasets

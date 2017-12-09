@@ -272,7 +272,7 @@ Also make sure to scale the [learning rate](#learning-rate-scaling) as appropria
  * `batch_size` - minibatch size
  * `data_size` - dimension of each data point
  * `seq_length` - length of time sequence for reconstruction/generation (sentiment inference has no maximum sequence length)
- * `data_set_type` - json or csv for sentiment transfer or unsupervised (only json available) for unsupervised reconstruction
+ * `data_set_type` - what type of dataset to model. one of [unsupervised,supervised]
  * `persist_state` - degree to which to persist state across samples for unsupervised learnign. 0 = reset state after every sample, 1 = reset state after finishing a shard, -1 = never reset state
  * `transpose` - transpose dataset, given batch size. Is always on for unsupervised learning, (should probably only be used for unsupervised).
  * `no_wrap` - In order to better concatenate strings together for unsupervised learning the batch data sampler does not drop the last batch, it instead "wraps" the dataset around to fill in the last batch of an epoch. On subsequent calls to the batch sampler the data set will have been shifted to account for this "wrapping" and allow for proper hidden state persistence. This is turned on by default in non-unsupervised scripts.
@@ -287,6 +287,7 @@ Also make sure to scale the [learning rate](#learning-rate-scaling) as appropria
  * `delim` - column delimiter for csv tokens (eg. ',', '\t', '|')
  * `drop_unlabeled` - drops unlabeled samples from csv/json file 
  * `binarize_sent` - if sentiment labels are not 0 or 1, then binarize them so that the lower half of sentiment ratings get set to 0, and the upper half of the rating scale gets set to 1.
+ * `num_shards` - number of total shards for unsupervised dataset. If a `split` is specified, appropriately portions the number of shards amongst the splits.
 
 #### Dataset Path Flags
  * `train` - path to training set

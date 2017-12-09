@@ -37,7 +37,7 @@ def script_config(parser):
 	parser.set_defaults(seq_length=256)
 	parser.set_defaults(eval_seq_length=0)
 	# set data_set_type
-	parser.set_defaults(data_set_type='csv')
+	parser.set_defaults(data_set_type='supervised')
 	parser.set_defaults(persist_state=0)
 	# set transpose
 	parser.set_defaults(transpose=False)
@@ -56,11 +56,12 @@ def script_config(parser):
 	parser.set_defaults(delim=',')
 	parser.set_defaults(drop_unlabeled=False)
 	parser.set_defaults(binarize_sent=False)
+	parser.set_defaults(num_shards=1)
 
 	# dataset path flags
 	# set datasets
 	parser.set_defaults(train='./data/binary_sst/train.csv')
-	parser.set_defaults(split='1.')
+	parser.set_defaults(split='1000,1,1')
 	parser.set_defaults(valid='./data/binary_sst/val.csv')
 	parser.set_defaults(test='./data/binary_sst/test.csv')
 

@@ -2,6 +2,7 @@ import os
 import mmap
 import pickle as pkl
 import time
+from itertools import accumulate
 
 import torch
 
@@ -9,7 +10,7 @@ def get_lazy_path(path):
 	"""gets path where lazy evaluation file are stored"""
 	return os.path.splitext(path)[0]+'.lazy'
 
-def exists_lazy(path, data_type):
+def exists_lazy(path, data_type='data'):
 	"""check if we've already made a lazy version of this file"""
 	if not os.path.exists(get_lazy_path(path)):
 		return False
@@ -20,7 +21,7 @@ def exists_lazy(path, data_type):
 		return False
 	return True
 
-def make_lazy(path, strs, str_ends, data_type):
+def make_lazy(path, strs, data_type='data'):
 	"""make lazy version of file"""
 	lazypath = get_lazy_path(path)
 	if not os.path.exists(lazypath):
@@ -30,6 +31,7 @@ def make_lazy(path, strs, str_ends, data_type):
 	if not torch.distributed._initialized or torch.distributed.get_rank() == 0:
 		with open(datapath, 'w') as f:
 			f.write(''.join(strs))
+		str_ends = list(accumulate(map(len, strs)))
 		pkl.dump(str_ends, open(lenpath, 'wb'))
 	else:
 		while not os.path.exists(lenpath):
@@ -47,7 +49,7 @@ class lazy_array_loader(object):
 		data_type: one of 'train', 'val', 'test'
 		mem_map: boolean specifying whether to memory map file `path`
 	"""
-	def __init__(self, path, data_type, mem_map=False):
+	def __init__(self, path, data_type='data', mem_map=False):
 		lazypath = get_lazy_path(path)
 		datapath = os.path.join(lazypath, data_type)
 		#get file where array entries are concatenated into one big string
