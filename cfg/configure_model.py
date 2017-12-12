@@ -19,6 +19,7 @@ class ModuleConfig(object):
 		dropout = opt.dropout
 		w_norm = opt.weight_norm
 		lstm_only = opt.lstm_only
+		fused = opt.fuse_lstm
 
 		saved_path = ''
 		if opt.load_model != '':
@@ -26,7 +27,7 @@ class ModuleConfig(object):
 			saved_path = os.path.join(model_dir, opt.load_model)
 		print(embed_size)
 		model, recurrent_module, embedder_module, chkpt = make_model(
-			cell_type=cell_type, num_layers=num_layers,
+			cell_type=cell_type, fused=fused, num_layers=num_layers,
 			embed_size=embed_size, hidden_size=hidden_size,
 			data_size=data_size, dropout=dropout, weight_norm=w_norm,
 			lstm_only=lstm_only, saved_path=saved_path)
@@ -46,6 +47,8 @@ def configure_model(parser):
 						help='directory where models are saved to/loaded from')
 	parser.add_argument('-rnn_type', default='mlstm',
 						help='mlstm, lstm or gru')
+	parser.add_argument('-fuse_lstm', action='store_true',
+						help='use fused lstm cuda kernels in mLSTM')
 	parser.add_argument('-layers', type=int, default=1,
 						help='Number of layers in the rnn')
 	parser.add_argument('-rnn_size', type=int, default=4096,

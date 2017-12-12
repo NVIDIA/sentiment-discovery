@@ -84,9 +84,9 @@ class ModelWrapper(object):
 		"""applies weight norm to all module parameters"""
 		# if lstm_only apply weight norm only to the lienar gates of lstm
 		if self.lstm_only:
-			apply_weight_norm(self.module.rnn.layers)
+			[apply_weight_norm(m, hook_child=False) for m in self.module.rnn.layers]
 		else:
-			apply_weight_norm(self.module)
+			apply_weight_norm(self.module, hook_child=False)
 		self.weight_norm = True
 
 	def remove_weight_norm(self):
@@ -378,12 +378,14 @@ class ModelWrapper(object):
 
 	def state_dict(self, destination=None, prefix='', keep_vars=False):
 		"""mimic nn.Module.state_dict()"""
-		return self.module.state_dict(destination=destination, prefix=prefix)
-		# TODO: @raulp update pytorch version requirements
-		# return self.module.state_dict(destination=destination,prefix=prefix,keep_vars=keep_vars)
+		if self.weight_norm:
+			self.remove_weight_norm()
+			sd = self.module.state_dict(destination=destination, prefix=prefix, keep_vars=keep_vars)
+			self.apply_weight_norm()
+		else:
+			sd = self.module.state_dict(destination=destination, prefix=prefix, keep_vars=keep_vars)
+		return sd
 
 	def load_state_dict(self, state_dict, strict=True):
 		"""mimic nn.Module.load_state_dict()"""
-		self.module.load_state_dict(state_dict)
-		# TODO: @raulp update pytorch version requirements
-		# self.module.load_state_dict(state_dict,strict=strict)
+		self.module.load_state_dict(state_dict, strict=strict)

@@ -12,14 +12,15 @@ class SequenceModel(nn.Module):
 	Based on implementation of StackedLSTM from openNMT-py
 	https://github.com/OpenNMT/OpenNMT-py/blob/master/onmt/modules/StackedRNN.py
 	Args:
-		embedder: instance of torch.nn.Embedding or something with an equivalent __call__ function
-		cell_type: string specifying recurrent cell type ['gru', 'mlstm', 'lstm', 'rnn']. Default: `rnn`
-		num_layers: how many of these cells to stack
-		input_size: The dimension of the input to the recurrent module (output dimension of embedder)
+		embed: instance of torch.nn.Embedding or something with an equivalent __call__ function
+		cell: string specifying recurrent cell type ['gru', 'mlstm', 'lstm', 'rnn']. Default: `rnn`
+		n_layers: how many of these cells to stack
+		in_size: The dimension of the input to the recurrent module (output dimension of embedder)
 		rnn_size: The number of features in the hidden states of the lstm cells
-		output_size: dimension of linear transformation layer on the output of the stacked rnn cells.
+		out_size: dimension of linear transformation layer on the output of the stacked rnn cells.
 			If <=0 then no output layer is applied. Default: -1
-		drop_out: probability of dropout layer (applied after rnn, but before output layer). Default: 0
+		dropout: probability of dropout layer (applied after rnn, but before output layer). Default: 0
+		fused: use fused LSTM kernels if applicable
 	Inputs: *inputs, **kwargs
 		- **input** (batch, input_size): tensor containing input features
 		- **h_0** (num_layers, batch, hidden_size): tensor containing the initial hidden
@@ -45,19 +46,19 @@ class SequenceModel(nn.Module):
 		...     output.append(out)
 	"""
 
-	def __init__(self, embedder, cell_type, num_layers, input_size, rnn_size, output_size, dropout):
+	def __init__(self, embed, cell, n_layers, in_size, rnn_size, out_size, dropout, fused=False):
 		super(SequenceModel, self).__init__()
-		self.add_module('embedder', embedder)
-		cell_type = cell_type.lower()
-		if cell_type == 'gru':
+		self.add_module('embedder', embed)
+		cell = cell.lower()
+		if cell == 'gru':
 			rnn_cell = nn.GRUCell
-		elif cell_type == 'mlstm':
-			rnn_cell = mLSTMCell
-		elif cell_type == 'lstm':
+		elif cell == 'mlstm':
+			rnn_cell = lambda size_in, size_rnn: mLSTMCell(size_in, size_rnn, fused_lstm=fused)
+		elif cell == 'lstm':
 			rnn_cell = nn.LSTMCell
 		else:
 			rnn_cell = nn.RNNCell
-		rnn = StackedLSTM(rnn_cell, num_layers, input_size, rnn_size, output_size, dropout)
+		rnn = StackedLSTM(rnn_cell, n_layers, in_size, rnn_size, out_size, dropout)
 		self.add_module('rnn', rnn)
 
 	def rnn_parameters(self):

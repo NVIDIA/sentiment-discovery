@@ -7,7 +7,7 @@ class StackedLSTM(nn.Module):
 	Based on implementation of StackedLSTM from openNMT-py
 	https://github.com/OpenNMT/OpenNMT-py/blob/master/onmt/modules/StackedRNN.py
 	Args:
-		cell: class of the LSTM/mLSTM cell u want to create
+		cell: LSTM/mLSTM cell u want to create. Callable of form `f(input, rnn_size)`
 		num_layers: how many of these cells to stack
 		input: The dimension of the input to the module
 		rnn_size: The number of features in the hidden states of the lstm cells
@@ -40,7 +40,8 @@ class StackedLSTM(nn.Module):
 		...     hiddens, out = rnn(input[i], hiddens)
 		...     output.append(out)
 	"""
-	def __init__(self, cell, num_layers, input_size, rnn_size, output_size=-1, dropout=0):
+	def __init__(self, cell, num_layers, input_size, rnn_size, 
+				output_size=-1, dropout=0):
 		super(StackedLSTM, self).__init__()
 
 		self.add_module('dropout', nn.Dropout(dropout))

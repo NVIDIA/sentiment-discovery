@@ -40,12 +40,13 @@ class mLSTMCell(nn.Module):
 		...     output.append(hx)
 	"""
 
-	def __init__(self, data_size, hidden_size, bias=True):
+	def __init__(self, data_size, hidden_size, bias=True, fused_lstm=False):
 		super(mLSTMCell, self).__init__()
 
 		self.hidden_size = hidden_size
 		self.data_size = data_size
 		self.bias = bias
+		self.fused = fused_lstm
 
 		self.add_module('wx', nn.Linear(data_size, 4*hidden_size, bias=False))
 		self.add_module('wh', nn.Linear(hidden_size, 4*hidden_size, bias=bias))
@@ -58,16 +59,22 @@ class mLSTMCell(nn.Module):
 
 		m = (self.wmx(data) * self.wmh(h0))
 
-		gates = self.wx(data) + self.wh(m)
+		if not self.fused:
+			gates = self.wx(data) + self.wh(m)
 
-		i, f, o, u = gates.chunk(4, 1)
+			i, f, o, u = gates.chunk(4, 1)
 
-		i = F.sigmoid(i)
-		f = F.sigmoid(f)
-		u = F.tanh(u)
-		o = F.sigmoid(o)
+			i = F.sigmoid(i)
+			f = F.sigmoid(f)
+			u = F.tanh(u)
+			o = F.sigmoid(o)
 
-		c1 = f * c0 + i * u
-		h1 = o * F.tanh(c1)
+			c1 = f * c0 + i * u
+			h1 = o * F.tanh(c1)
 
-		return h1, c1
+			return h1, c1
+		else:
+			return self._backend.LSTMCell(
+				data, (m, c0),
+				self.wx.weight, self.wh.weight,
+				self.wx.bias, self.wh.bias)

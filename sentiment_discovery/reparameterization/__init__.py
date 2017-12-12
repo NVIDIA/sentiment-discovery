@@ -1,7 +1,7 @@
 from .weight_norm import WeightNorm
 from .reparameterization import Reparameterization
 
-def apply_weight_norm(module, name='', dim=0, retain_forward=True):
+def apply_weight_norm(module, name='', dim=0, retain_forward=True, hook_child=True):
 	"""
 	Applies weight normalization to a parameter in the given module.
 	If no parameter is provided, applies weight normalization to all
@@ -30,6 +30,8 @@ def apply_weight_norm(module, name='', dim=0, retain_forward=True):
 		dim (int, optional): dimension over which to compute the norm
 		retain_forward (boolean, optional): if False deletes weight on call to
 			module.backward. Used to avoid memory leaks with DataParallel Default: True
+		hook_child (boolean, optional): adds reparameterization hook to direct parent of the 
+			parameters. If False, it's added to `module` instead. Default: True
 
 	Returns:
 		The original module with the weight norm hook
@@ -44,7 +46,7 @@ def apply_weight_norm(module, name='', dim=0, retain_forward=True):
 		torch.Size([40, 20])
 
 	"""
-	return apply_reparameterization(module, reparameterization=WeightNorm,
+	return apply_reparameterization(module, reparameterization=WeightNorm, hook_child=hook_child,
 									name=name, dim=dim, retain_forward=retain_forward)
 
 def remove_weight_norm(module, name='', remove_all=False):
@@ -61,7 +63,7 @@ def remove_weight_norm(module, name='', remove_all=False):
 	return remove_reparameterization(module, reparameterization=WeightNorm,
 									name=name, remove_all=remove_all)
 
-def apply_reparameterization(module, reparameterization=None, name='', dim=0, retain_forward=True):
+def apply_reparameterization(module, reparameterization=None, name='', dim=0, retain_forward=True, hook_child=True):
 	"""
 	Applies a given weight reparameterization (such as weight normalization) to
 	a parameter in the given module. If no parameter is given, applies the reparameterization
@@ -73,7 +75,9 @@ def apply_reparameterization(module, reparameterization=None, name='', dim=0, re
 		name (str, optional): name of weight parameter
 		dim (int, optional): dimension over which to perform reparameterization op
 		retain_forward (boolean, optional): if False deletes weight on call to
-			module.backward. Used to avoid memory leaks with DataParallel Default: True
+			module.backward. Used to avoid memory leaks with DataParallel. Default: True
+		hook_child (boolean, optional): adds reparameterization hook to direct parent of the 
+			parameters. If False, it's added to `module` instead. Default: True
 
 	Returns:
 		The original module with the reparameterization hook
@@ -86,11 +90,11 @@ def apply_reparameterization(module, reparameterization=None, name='', dim=0, re
 	"""
 	assert reparameterization is not None
 	if name != '':
-		Reparameterization.apply(module, name, dim, retain_forward, reparameterization)
+		Reparameterization.apply(module, name, dim, retain_forward, reparameterization, hook_child)
 	else:
 		names = list(module.state_dict().keys())
 		for name in names:
-			apply_reparameterization(module, reparameterization, name, dim, retain_forward)
+			apply_reparameterization(module, reparameterization, name, dim, retain_forward, hook_child)
 	return module
 
 def remove_reparameterization(module, reparameterization=Reparameterization,

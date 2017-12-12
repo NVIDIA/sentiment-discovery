@@ -1,25 +1,29 @@
 import torch
 from torch.nn.parameter import Parameter
-
+import sys
 class Reparameterization(object):
 	"""
 	Class interface for performing weight reparameterizations
 	Arguments:
 		name (str): name of weight parameter
 		dim (int): dimension over which to compute the norm
+		module (nn.Module): parent module to which param `name` is registered to
 		retain_forward (bool, optional): if False deletes weight on call to 
 			module.backward. Used to avoid memory leaks with DataParallel Default: True
 	Attributes:
 		reparameterization_names (list, str): contains names of all parameters 
-			needed to compute reparameterization. 
+			needed to compute reparameterization.
+		backward_hook_key (int): torch.utils.hooks.RemovableHandle.id for hook used in module backward pass.
 	"""
 
-	def __init__(self, name, dim, retain_forward=True):
+	def __init__(self, name, dim, module, retain_forward=True):
 		self.name = name
 		self.dim = dim
 		self.evaluated = False
 		self.retain_forward = retain_forward
 		self.reparameterization_names = []
+		self.backward_hook_key = None
+		self.module = module
 
 	def compute_weight(self, module):
 		"""
@@ -50,9 +54,10 @@ class Reparameterization(object):
 		raise NotImplementedError
 
 	@staticmethod
-	def apply(module, name, dim, retain_forward=True, reparameterization=None):
+	def apply(module, name, dim, retain_forward=True, reparameterization=None, hook_child=True):
 		"""
 		Applies reparametrization to module's `name` parameter and modifies instance attributes as appropriate.
+		`hook_child` adds reparameterization hook to direct parent of the parameters. If False, it's added to `module` instead.
 		"""
 		if reparameterization is None:
 			reparameterization = Reparameterization
@@ -60,7 +65,7 @@ class Reparameterization(object):
 		if name2use is None or isinstance(module2use, (torch.nn.Embedding, torch.nn.EmbeddingBag)):
 			return
 
-		fn = reparameterization(name2use, dim, retain_forward=retain_forward)
+		fn = reparameterization(name2use, dim, module2use, retain_forward=retain_forward)
 
 		weight = getattr(module2use, name2use)
 		if weight.dim() <= 1:
@@ -79,11 +84,14 @@ class Reparameterization(object):
 
 		setattr(module2use, name2use, None)
 
+		hook_module = module2use
+		if not hook_child:
+			hook_module = module
 		# recompute weight before every forward()
-		module2use.register_forward_pre_hook(fn)
+		hook_module.register_forward_pre_hook(fn)
 
 		# remove weight during backward
-		handle = module2use.register_backward_hook(fn.backward_hook)
+		handle = hook_module.register_backward_hook(fn.backward_hook)
 		# get hook key so we can delete it later
 		fn.backward_hook_key = handle.id
 
@@ -114,27 +122,28 @@ class Reparameterization(object):
 
 	def remove(self, module):
 		"""removes reparameterization and backward hook (does not remove forward hook)"""
-		for p in self.get_params(module):
+		for p in self.get_params(self.module):
 			p.requires_grad = False
-		weight = self.compute_weight(module)
-		delattr(module, self.name)
+		weight = self.compute_weight(self.module)
+		delattr(self.module, self.name)
 		for n in self.reparameterization_names:
-			del module._parameters[n]
-		module.register_parameter(self.name, Parameter(weight.data))
+			del self.module._parameters[n]
+		self.module.register_parameter(self.name, Parameter(weight.data))
 		del module._backward_hooks[self.backward_hook_key]
 
 	def __call__(self, module, inputs):
 		"""callable hook for forward pass"""
-		_w = getattr(module, self.name)
+		sys.stdout.flush()
+		_w = getattr(self.module, self.name)
 		if not self.evaluated or _w is None:
-			setattr(module, self.name, self.compute_weight(module))
+			setattr(self.module, self.name, self.compute_weight(self.module))
 			self.evaluated = True
 
 	def backward_hook(self, module, grad_input, grad_output):
 		"""callable hook for backward pass"""
-		wn = getattr(module, self.name)
+		wn = getattr(self.module, self.name)
 		if wn is not None and not self.retain_forward and self.evaluated:
 			del wn.grad
 			wn.grad = None
-			setattr(module, self.name, None)
+			setattr(self.module, self.name, None)
 		self.evaluated = False
