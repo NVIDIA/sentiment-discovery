@@ -103,6 +103,8 @@ The dataset entries are [transposed](https://yagr.nvidia.com/ADLR/sentiment-os/b
 
 Hidden states are reset either at the start of every sequence, every shard, or never based on the value of `persist_state`. See [data flags](#data-flags).
 
+We use an evaluation sequence length of -1. A negative `seq_length` calculates sequence length s.t. there are `seq_length` samples in the dataset.
+
 Lastly, We know waiting for more than 1 million updates over 1 epoch for large datasets is a long time. We've set the training script to save the most current model (and data history) every `save_iters` steps within an epoch, and also included a `-max_iters` flag to end training early.
 
 ![Our Loss results](./figures/loss.png "Unsupervised Reconstruction BPC")
