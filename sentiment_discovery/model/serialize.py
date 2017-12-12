@@ -1,12 +1,12 @@
 import torch
 
-def save(model, savepath, save_dict=None):
+def save(model, savepath, save_dict=None, keep_vars=True):
 	"""save model weights and other metadata"""
 	if save_dict is not None:
 		#if save_dict is provided save that instead of model state_dict
 		torch.save(state_dict_cpu_copy(save_dict), savepath)
 	else:
-		torch.save(state_dict_cpu_copy(model.state_dict()), savepath)
+		torch.save(state_dict_cpu_copy(model.state_dict(keep_vars=keep_vars)), savepath)
 
 def state_dict_cpu_copy(chkpt):
 	"""save cpu copy of model state, so it can be reloaded by any device"""
@@ -27,14 +27,5 @@ def restore(model, load_path):
 		state_dict = chkpt['state_dict']
 	else:
 		state_dict = chkpt
-	num_params = len(state_dict.keys())
-	#check to make sure we didnt save weights in weight_norm mode
-	if num_params > len(model.parameters()):
-		#if we did then apply weight norm to model, restore weights, remove wn
-		model.apply_weight_norm()
-		assert num_params == len(model.parameters())
-		model.load_state_dict(state_dict)
-		model.remove_weight_norm()
-	else:
-		model.load_state_dict(state_dict)
+	model.load_state_dict(state_dict)
 	return chkpt

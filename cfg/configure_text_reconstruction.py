@@ -31,7 +31,7 @@ class ScriptConfig(object):
 		cfg.inner_lr = None
 		if not opt.should_test:
 
-			if cfg.chkpt is not None and 'optim' in cfg.chkpt:
+			if cfg.chkpt is not None and opt.load_optim and 'optim' in cfg.chkpt:
 				cfg.model.add_optimizer(cfg.chkpt['optim'], load_optim=True,
 					lr=cfg.initial_lr, clip=opt.clip)
 			else:
@@ -63,12 +63,13 @@ def make_saver(cfg, opt):
 			cfg.histories[-1] = history
 		if not opt.distributed or opt.rank == 0:
 			checkpoint = {
-						'state_dict': cfg.model.state_dict(),
+						'state_dict': cfg.model.state_dict(keep_vars=False),
 						'opt': cfg.opt,
 						'epoch': epoch,
-						'optim' : cfg.optim,
 						'histories': cfg.histories
 					}
+			if opt.save_optim:
+				checkpoint['optim'] = cfg.optim
 			save(cfg.model, os.path.join(cfg.logger.get_log_dir(opt.model_dir), basename), save_dict=checkpoint)
 			cfg.logger.log_pkl(cfg.histories, 'histories', os.path.splitext(basename)[0]+'.pkl', 'wb')
 	return _saver
@@ -118,6 +119,14 @@ def script_config(parser):
 						help="""Clip gradients at this value.""")
 	parser.add_argument('-no_loss', action='store_true',
 						help='whether or not to track the loss curve of the model')
+	parser.add_argument('-save_epochs', type=int, default=1,
+						help='number of epochs to save model progress. Defaults to every epoch')
+	parser.add_argument('-save_iters', type=int, default=-1,
+						help='number of iterations to save model per epoch')
+	parser.add_argument('-save_optim', action='store_true',
+						help='if enabled save optimizer state when saving model progress')
+	parser.add_argument('-load_optim', action='store_true',
+						help='if enabled load optimizer state from saved model if available')
 
 	# experiment flags
 	parser.set_defaults(experiment_dir='./experiments')
@@ -127,6 +136,7 @@ def script_config(parser):
 	parser.set_defaults(should_test=False)
 	parser.set_defaults(embed_size=64)
 	parser.set_defaults(rnn_type='mlstm')
+	parser.set_defaults(fuse_lstm=False)
 	parser.set_defaults(rnn_size=4096)
 	parser.set_defaults(layers=1)
 	parser.set_defaults(dropout=0)
@@ -143,6 +153,7 @@ def script_config(parser):
 	parser.set_defaults(seq_length=256)
 	parser.set_defaults(eval_seq_length=0)
 	parser.set_defaults(data_set_type='unsupervised')
+	parser.set_defaults(loose_json=False)
 	parser.set_defaults(persist_state=0)
 	parser.set_defaults(transpose=True)
 	parser.set_defaults(no_wrap=False)

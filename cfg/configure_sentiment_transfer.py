@@ -21,6 +21,7 @@ def script_config(parser):
 	parser.set_defaults(should_test=False)
 	parser.set_defaults(embed_size=64)
 	parser.set_defaults(rnn_type='mlstm')
+	parser.set_defaults(fuse_lstm=False)
 	parser.set_defaults(rnn_size=4096)
 	parser.set_defaults(layers=1)
 	parser.set_defaults(dropout=0)
@@ -38,6 +39,7 @@ def script_config(parser):
 	parser.set_defaults(eval_seq_length=0)
 	# set data_set_type
 	parser.set_defaults(data_set_type='supervised')
+	parser.set_defaults(loose_json=False)
 	parser.set_defaults(persist_state=0)
 	# set transpose
 	parser.set_defaults(transpose=False)

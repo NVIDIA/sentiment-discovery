@@ -20,7 +20,7 @@ from cfg import cfg, configure_usage
 
 # @profile
 def run_epoch(model, epoch, data2use, data_fn, num_batches, is_training=False,
-				_cfg=None, inner_lr=None, saver=None):
+				_cfg=None, inner_lr=None, saver=None, save_every=-1):
 	"""runs model over epoch of data, trains if necessary, and saves/returns model progress"""
 	if is_training:
 		print('entering training epoch %s'% (str(epoch),))
@@ -84,7 +84,7 @@ def run_epoch(model, epoch, data2use, data_fn, num_batches, is_training=False,
 		sys.stdout.flush()
 
 		#save model
-		if is_training and s%5000 == 0:
+		if save_every > 0 and is_training and (s+1) % save_every == 0:
 			print('saving iter %s of epoch %s'%(str(s), str(epoch)))
 			if saver is not None:
 				saver('.%s.pt'%(str(s)), loss_history)
@@ -123,6 +123,8 @@ def main():
 	lr_scheduler = cfg.lr
 	outer_loop = cfg.outer_loop
 	saver = cfg.saver
+	save_iters = opt.save_iters
+	save_epochs = opt.save_epochs
 	histories = []
 	val_histories = []
 	test_histories = []
@@ -137,21 +139,22 @@ def main():
 		loss_avg = 0.
 		history = []
 		try:
-			if opt.train != 'None':
+			if text is not None:
 				_, history = run_epoch(model, e, text, train_fn, n_batch, is_training=not opt.should_test,
-										inner_lr=cfg.inner_lr, saver=lambda ext, x: saver('e'+str(e)+ext, x))
-				saver('e'+str(e)+'.pt',history)
-			if opt.valid != 'None':
+										inner_lr=cfg.inner_lr, save_every=save_iters,
+										saver=lambda ext, x: saver('e'+str(e)+ext, x))
+				if save_epochs > 0 and e % save_epochs == 0:
+					saver('e'+str(e)+'.pt',history)
+				else:
+					logger.log_pkl(histories, 'histories', 'e%s.pkl' % (e,), 'wb')
+			if valid is not None:
 				_, val_history = run_epoch(model, e, valid, eval_fn, nv_batch, is_training=False)
 				val_histories.append(val_history)
 				logger.log_pkl(val_histories, 'val_history', 'e%s.pkl' % (e,), 'wb')
-			if opt.test != 'None':
+			if test is not None:
 				_, test_history = run_epoch(model, e, test, eval_fn, nt_batch, is_training=False)
 				test_histories.append(test_history)
 				logger.log_pkl(test_histories, 'test_history', 'e%s.pkl' % (e,), 'wb')
-
-			#save progress
-			saver('e'+str(e), history)
 
 			if opt.lr_scheduler == 'linear' or opt.no_loss:
 				pass
