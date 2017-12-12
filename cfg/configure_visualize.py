@@ -65,6 +65,8 @@ def script_config(parser):
 	parser.set_defaults(drop_unlabeled=False)
 	parser.set_defaults(binarize_sent=False)
 	parser.set_defaults(num_shards=1)
+	parser.set_defaults(val_shards=1)
+	parser.set_defaults(test_shards=1)
 
 	# dataset path flags
 	# set no datasets

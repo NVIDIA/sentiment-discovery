@@ -19,23 +19,23 @@ class DataConfig(object):
 def make_loaders(cfg, opt):
 	"""makes training/val/test"""
 	data_loader_args = {'num_workers': 1, 'shuffle': opt.shuffle, 'batch_size': cfg.batch_size,
-					'pin_memory': True, 'transpose': opt.transpose, 'distributed': opt.distributed,
+					'pin_memory': opt.cuda, 'transpose': opt.transpose, 'distributed': opt.distributed,
 					'rank': opt.rank, 'world_size': opt.world_size, 'wrap_last': not opt.no_wrap}
 	data_set_args = {
-		'path': opt.train, 'seq_length': opt.seq_length, 'cache': opt.cache,
+		'path': opt.train, 'seq_length': cfg.seq_length, 'cache': opt.cache,
 		'text_key': opt.text_key, 'label_key': opt.label_key, 'lazy': opt.lazy,
 		'preprocess': opt.preprocess, 'persist_state': opt.persist_state,
 		'cache_size': opt.batch_size, 'delim': opt.delim, 'num_shards': opt.num_shards,
-		'ds_type': opt.data_set_type, 'split': cfg.split}
+		'ds_type': opt.data_set_type, 'split': cfg.split, 'loose': opt.loose_json}
 	eval_loader_args = copy.copy(data_loader_args)
 	eval_set_args = copy.copy(data_set_args)
 	eval_set_args['split']=[1.]
 	# if optional eval args were set then replace their equivalent values in the arg dict
 	if opt.eval_batch_size != 0:
-		eval_loader_args['batch_size'] = opt.eval_batch_size
-		eval_set_args['cache_size'] = opt.eval_batch_size
+		eval_loader_args['batch_size'] = cfg.eval_batch_size
+		eval_set_args['cache_size'] = cfg.eval_batch_size
 	if opt.eval_seq_length != 0:
-		eval_set_args['seq_length'] = opt.eval_seq_length
+		eval_set_args['seq_length'] = cfg.eval_seq_length
 	if opt.eval_text_key != 'None':
 		eval_set_args['text_key'] = opt.eval_text_key
 	if opt.eval_label_key != 'None':
@@ -50,7 +50,7 @@ def make_loaders(cfg, opt):
 		if should_split(cfg.split):
 			train, valid, test = train
 
-	if valid is None and opt.valid != 'None':
+	if opt.valid != 'None':
 		eval_set_args['path'] = opt.valid
 		valid = data_utils.make_dataset(**eval_set_args)
 	if test is None and opt.test != 'None':
@@ -59,11 +59,19 @@ def make_loaders(cfg, opt):
 
 	if train is not None:
 		train = data_utils.DataLoader(train, **data_loader_args)
-	if opt.eval_batch_size != 0:
-		data_loader_args['batch_size'] = opt.eval_batch_size
 	if valid is not None:
+		if opt.data_set_type == 'unsupervised':
+			if opt.eval_seq_length != 0:
+				valid.set_seq_len(cfg.eval_seq_length)
+			if opt.val_shards != 0:
+				valid.set_num_shards(opt.val_shards)
 		valid = data_utils.DataLoader(valid, **eval_loader_args)
 	if test is not None:
+		if opt.data_set_type == 'unsupervised':
+			if opt.eval_seq_length != 0:
+				test.set_seq_len(cfg.eval_seq_length)
+			if opt.test_shards != 0:
+				test.set_num_shards(opt.test_shards)
 		test = data_utils.DataLoader(test, **eval_loader_args)
 	return train, valid, test
 
@@ -111,9 +119,8 @@ def configure_data(parser):
 						help='input dimension of each timestep of data')
 	parser.add_argument('-data_set_type', default='unsupervised',
 						help='what type of dataset to model. one of [unsupervised,supervised]')
-	parser.add_argument('-num_shards', type=int, default=1002,
-						help="""number of total shards for unsupervised dataset. If a `split` is specified,
-								appropriately portions the number of shards amongst the splits.""")
+	parser.add_argument('-loose_json', action='store_true',
+						help='Use loose json (one json-formatted string per newline), instead of tight json (data file is one json string)')
 	parser.add_argument('-transpose', action='store_true',
 						help='use transposed sampling instead of default sampler for unshuffled sampling.')
 	parser.add_argument('-preprocess', action='store_true',
@@ -144,4 +151,11 @@ def configure_data(parser):
 						help='0=reset state after every sample,1=reset state after every shard,-1=never reset state')
 	parser.add_argument('-cache', action='store_true',
 						help='use caching mechanism to pull data ')
+	parser.add_argument('-num_shards', type=int, default=1002,
+						help="""number of total shards for unsupervised training dataset. If a `split` is specified,
+								appropriately portions the number of shards amongst the splits.""")
+	parser.add_argument('-val_shards', type=int, default=0,
+						help="""number of shards for unsupervised validation dataset if validation set is specified and not split from training""")
+	parser.add_argument('-test_shards', type=int, default=0,
+						help="""number of shards for unsupervised test dataset if test set is specified and not split from training""")
 	return DataConfig(parser)

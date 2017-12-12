@@ -7,10 +7,19 @@ class DeviceConfig(object):
 	def apply(self, cfg, opt):
 		print('configuring devices')
 		cfg.batch_size = opt.batch_size
+		cfg.eval_batch_size = opt.eval_batch_size
+		cfg.seq_length = opt.seq_length
+		cfg.eval_seq_length = opt.eval_seq_length
 		if opt.cuda and opt.num_gpus > 1 or opt.distributed:
 			cfg.batch_size *= opt.num_gpus
+			cfg.eval_batch_size *= opt.num_gpus
+			if opt.seq_length < 0:
+				cfg.seq_length *= opt.num_gpus
+			if opt.eval_seq_length < 0:
+				cfg.eval_seq_length *= opt.num_gpus
 		cfg.model.initialize(opt.batch_size if opt.distributed else cfg.batch_size, volatile=opt.should_test)
-		cfg.model.cuda()
+		if opt.cuda:
+			cfg.model.cuda()
 		if opt.cuda and opt.num_gpus > 1 or opt.distributed:
 			cfg.model.make_data_parallel(opt.num_gpus, distributed=opt.distributed,
 										rank=opt.rank, world_size=opt.world_size)

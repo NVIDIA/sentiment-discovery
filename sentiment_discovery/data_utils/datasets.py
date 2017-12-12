@@ -280,8 +280,8 @@ class json_dataset(data.Dataset):
 				j[self.label_key] = -1
 			yield j
 
-def get_shard_indices(strs, num_shards=1000):
-	shard_size = len(strs)//num_shards
+def get_shard_indices(num_strs, num_shards=1000):
+	shard_size = num_strs//num_shards
 	inds = list(np.arange(num_shards)*shard_size)
 	return set(inds)
 
@@ -302,11 +302,10 @@ class unsupervised_dataset(data.Dataset):
 		num_strs (int): len(all_strs)
 		shard_starts (set): set containing indices of what strings
 	"""
-	def __init__(self, ds, seq_len=256, persist_state=PERSIST_SHARD, num_shards=1002):
+	def __init__(self, ds, seq_len=256, persist_state=PERSIST_SHARD, num_shards=1):
 		# self.path = path
 		self.persist_state = persist_state
 		# self.lazy = lazy
-		self.seq_len = seq_len
 		if isinstance(ds, lazy_array_loader):
 			self.all_strs = ds
 			self.str_ends = ds.ends
@@ -315,16 +314,25 @@ class unsupervised_dataset(data.Dataset):
 			self.str_ends = list(accumulate(map(len, self.all_strs)))
 		self.total_chars = self.str_ends[-1]
 		self.num_strs = len(self.all_strs)
-		#get indices of shard starts for the strings
-		self.shard_starts = get_shard_indices(self.all_strs, num_shards)
 
-		if self.seq_len == -1:
-			self.seq_len = self.total_chars
+		#get indices of shard starts for the strings
+		self.set_num_shards(num_shards)
+
+		self.set_seq_len(seq_len)
+
+	def set_seq_len(self, seq_len):
+		self.seq_len = seq_len
+		assert self.seq_len != 0
+		if self.seq_len < 0:
+			self.seq_len = (self.total_chars-1)//(-self.seq_len)
+
+	def set_num_shards(self, num_shards):
+		self.shard_starts = get_shard_indices(self.num_strs, num_shards)
 
 	def __len__(self):
-		if self.seq_len == self.total_chars:
+		if self.seq_len >= self.total_chars-1:
 			return 1
-		return (self.total_chars-self.seq_len-1)//self.seq_len
+		return (self.total_chars-1)//self.seq_len
 
 	def __getitem__(self, index):
 		"""
@@ -339,11 +347,12 @@ class unsupervised_dataset(data.Dataset):
 			str_start_ind = self.str_ends[str_ind-1]
 		else:
 			str_start_ind = 0
+
 		#subtract string start index from sequence start index
 		start_char = index*self.seq_len-str_start_ind
 
-		if self.seq_len == self.total_chars:
-			rtn_strings = self.all_strs[:]
+		if self.seq_len >= self.total_chars-1:
+			rtn_strings = list(self.all_strs)
 		else:
 			rtn_strings = []
 			#get first string of sequence
