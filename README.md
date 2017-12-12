@@ -73,9 +73,7 @@ We've included our own trained mlstm/lstm models as well as OpenAI's mlstm model
  * [openai mlstm](https://drive.google.com/open?id=1k96ZwUq8PWoBffz1o-vxHfEVWryCQyHN)[329MB]
 
 ### Data Downloads
-We've included a link to a preprocessed version of the amazon review dataset. We've also included links to both the full dataset, and a pre-sharded (into train/val/test) version meant for lazy evaluation that we used to generate our results.
- * [full](https://drive.google.com/open?id=1_8dIhs5a53jAkXm3Q7hfMxUdBsUHeg5W)[40GB]
- * [lazy shards](https://drive.google.com/file/d/1ZK2mSBk253SG0oVestvjfp2gnMjIA71Z/view?usp=sharing)[37GB]
+We've provided the Binary Stanford Sentiment Treebank and IMDB Movie Review datasets as part of this repository. In order to train on the amazon dataset please download the "aggressively deduplicated data" version from Julian McAuley's original [site](http://jmcauley.ucsd.edu/data/amazon/). Access requests to the dataset should be approved instantly. While using the dataset make sure to load it with the `-loose_json` flag.
 
 ## Usage
 In addition to providing easily reusable code of the core functionalities of this work in our `sentiment_discovery` package, we also provide scripts to perform the three main high-level functionalities in the paper:
@@ -86,25 +84,26 @@ In addition to providing easily reusable code of the core functionalities of thi
 Script results will be saved/logged to the `<experiment_dir>/<experiment_name>/*` directory hierarchy.
 
 ### Unsupervised Reconstruction
-Train a recurrent language model (mlstm/lstm) and save it to the `<model_dir>/` directory in the above hierarchy. The metric histories will be available in the appropriate `<history>/` directory in the same hierarchy. In order to apply `weight_norm` only to lstm parameters as specified by the paper we use the `-lstm_only` flag.
+Train a recurrent language model (mlstm/lstm) and save it to the `<model_dir>/` directory in the above hierarchy. The metric histories will be available in the appropriate `<history>/` directory in the same hierarchy. In order to apply `weight_norm` only to lstm parameters as specified by the paper we use the `-lstm_only` flag. Additionally, we use fused LSTM kernels in the mlstm by specifying the `fuse_lstm` flag, in order to achieve modest speedups.
 
 ```
-python text_reconstruction.py -experiment_dir ./experiments -experiment_name mlstm -model_dir model -cuda \
--embed_size 64 -rnn_size 4096 -layers 1 -weight_norm -lstm_only -rnn_type mlstm -dropout 0 -persist_state 1 \
--seq_length 256 -batch_size 32 -lr 0.000125 --optimizer_type=Adam -lr_scheduler LinearLR -epochs 1  \
--train data/amazon/reviews.json -valid data/amazon/reviews.json -test data/amazon/reviews.json \
--data_set_type unsupervised -lazy -text_key sentence -eval_batch_size -1 -eval_seq_length -1
+python3 text_reconstruction.py -experiment_dir ./experiments -experiment_name mlstm -model_dir model -cuda \
+-embed_size 64 -rnn_size 4096 -layers 1 -rnn_type mlstm -dropout 0 -weight_norm -lstm_only -fuse_lstm \
+-train data/amazon/reviews.json -loose_json -text_key reviewText -lazy -data_set_type unsupervised \
+-batch_size 32 -seq_length 256 -lr 0.000125 --optimizer_type=Adam -lr_scheduler LinearLR -epochs 1 \
+-num_shards 1002 -split 1000,1,1 -eval_batch_size 1 -eval_seq_length -1 -persist_state 1
+-save_epochs 1 -save_iters 5000 
 ```
 
 The training process takes in a json list (or csv) file as a dataset where each entry has key (or column) `text_key` containing samples of text to model.
 
-The unsupervised dataset will proportionally take 1002 (1000 train) shards from the training, validation, and test sets. Currently the same dataset must be used for all three.
+The unsupervised dataset will proportionally split `num_shards` amongst train/val/test according to `split`. Validation/test sets can also be supplied manually, they will also have `num_shards` shards.
 
 The dataset entries are [transposed](https://yagr.nvidia.com/ADLR/sentiment-os/blob/master/sentiment_discovery/data_utils/samplers.py#L114) to allow for the concatenation of sequences in order to persist hidden state across a shard in the training process.
 
 Hidden states are reset either at the start of every sequence, every shard, or never based on the value of `persist_state`. See [data flags](#data-flags).
 
-Lastly, We know waiting for more than 1 million updates over 1 epoch for large datasets is a long time. We've set the training script to save the most current model (and data history) every [5000 iterations](https://yagr.nvidia.com/ADLR/sentiment-os/blob/master/text_reconstruction.py#L81), and also included a `-max_iters` flag to end training early.
+Lastly, We know waiting for more than 1 million updates over 1 epoch for large datasets is a long time. We've set the training script to save the most current model (and data history) every `save_iters` steps within an epoch, and also included a `-max_iters` flag to end training early.
 
 ![Our Loss results](./figures/loss.png "Unsupervised Reconstruction BPC")
 
@@ -124,6 +123,10 @@ For a list of default values for all flags look at `./cfg/configure_text_reconst
  * `max_iters` - total number of training iterations to run. Takes presedence over number of epochs
  * `start_epoch` - epoch to start training at (used to resume training for exponential decay scheduler)
  * `start_iter` - what iteration to start training at (used mainly for resuming linear learning rate scheduler)
+ * `save_epochs` - number of epochs to save model progress. Defaults to every epoch
+ * `save_iters` - save model every so often per epoch
+ * `save_optim` - if enabled save optimizer state when saving model progress
+ * `load_optim` - if enabled load optimizer state from saved model if available
 
 ### Sentiment Transfer
 This script parses sample text and binary sentiment labels from csv (or json) data files according to `-text_key`/`label_key`. The text is then featurized and fit to a logistic regression model.
@@ -227,10 +230,12 @@ For a list of default values for all flags look at `./cfg/configure_visualizatio
 
 ### Distributed Usage
 ```
-python text_reconstruction.py -experiment_dir ./experiments -experiment_name mlstm -model_dir model -cuda \
--embed_size 64 -rnn_size 4096 -layers 1 -weight_norm -lstm_only -rnn_type mlstm -dropout 0 -persist_state 1 \
--seq_length 256 -batch_size 32 -lr 0.00025 --optimizer_type=Adam -lr_scheduler LinearLR -epochs 1  \
--train data/amazon/reviews.json -data_set_type unsupervised -lazy -text_key sentence -num_gpus 2 -distributed \
+python3 text_reconstruction.py -experiment_dir ./experiments -experiment_name mlstm -model_dir model \
+-embed_size 64 -rnn_size 4096 -layers 1 -rnn_type mlstm -dropout 0 -weight_norm -lstm_only -fuse_lstm \
+-train data/amazon/reviews.json -loose_json -text_key reviewText -lazy -data_set_type unsupervised \
+-batch_size 32 -seq_length 256 -lr 0.000125 --optimizer_type=Adam -lr_scheduler LinearLR -epochs 1 \
+-num_shards 1002 -split 1000,1,1 -eval_batch_size 1 -eval_seq_length -1 -persist_state 1
+-save_epochs 1 -save_iters 5000 -cuda -num_gpus 2 -distributed
 ```
 
 In order to utilize Data Parallelism during training time ensure that `-cuda` is in use and that `-num_gpus` >1. As mentioned previously, vanilla DataParallelism produces no speedup for recurrent architectures. In order to circumvent this problem turn on the `-distributed` flag to utilize PyTorch's DistributedDataParallel instead and experience  speedup gains. 
@@ -259,6 +264,7 @@ Also make sure to scale the [learning rate](#learning-rate-scaling) as appropria
  * `should_test` - whether to train or evaluate a model
  * `embed_size` - embedding size for data
  * `rnn_type` - one of <`mlstm`,`lstm`>
+ * `fuse_lstm` - use fused lstm cuda kernels in mLSTM. Currently still buggy **Do not use**.
  * `rnn_size` - hidden state dimension of rnn
  * `layers` - Number of stacked recurrent layers
  * `dropout` - dropout probability after hidden state (0 = None, 1 = all dropout)
@@ -273,6 +279,7 @@ Also make sure to scale the [learning rate](#learning-rate-scaling) as appropria
  * `data_size` - dimension of each data point
  * `seq_length` - length of time sequence for reconstruction/generation (sentiment inference has no maximum sequence length)
  * `data_set_type` - what type of dataset to model. one of [unsupervised,supervised]
+ * `loose_json` - Use loose json (one json-formatted string per newline), instead of tight json (data file is one json string)
  * `persist_state` - degree to which to persist state across samples for unsupervised learnign. 0 = reset state after every sample, 1 = reset state after finishing a shard, -1 = never reset state
  * `transpose` - transpose dataset, given batch size. Is always on for unsupervised learning, (should probably only be used for unsupervised).
  * `no_wrap` - In order to better concatenate strings together for unsupervised learning the batch data sampler does not drop the last batch, it instead "wraps" the dataset around to fill in the last batch of an epoch. On subsequent calls to the batch sampler the data set will have been shifted to account for this "wrapping" and allow for proper hidden state persistence. This is turned on by default in non-unsupervised scripts.
@@ -287,7 +294,9 @@ Also make sure to scale the [learning rate](#learning-rate-scaling) as appropria
  * `delim` - column delimiter for csv tokens (eg. ',', '\t', '|')
  * `drop_unlabeled` - drops unlabeled samples from csv/json file 
  * `binarize_sent` - if sentiment labels are not 0 or 1, then binarize them so that the lower half of sentiment ratings get set to 0, and the upper half of the rating scale gets set to 1.
- * `num_shards` - number of total shards for unsupervised dataset. If a `split` is specified, appropriately portions the number of shards amongst the splits.
+ * `num_shards` - number of total shards for unsupervised training dataset. If a `split` is specified, appropriately portions the number of shards amongst the splits.
+ * `val_shards` - number of total shards for unsupervised validation set. If specified, overrides number of shards if any were split from `num_shards`.
+ * `test_shards` - number of total shards for unsupervised test set. If specified, overrides number of shards if any were split from `num_shards`.
 
 #### Dataset Path Flags
  * `train` - path to training set
