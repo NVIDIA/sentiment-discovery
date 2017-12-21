@@ -5,7 +5,7 @@ import numpy as np
 from sentiment_discovery.reparameterization import apply_weight_norm, remove_weight_norm
 from torch.nn.parallel import DataParallel, DistributedDataParallel
 from .utils import copy_state, clip_gradients, calc_grad_norm, clip_gradient
-from .fp16 import FP16_Module, FP16_Optimizer, fp16_to_fp32, fp32_to_fp16
+from .fp16 import FP16_Optimizer, fp16_to_fp32, fp32_to_fp16
 
 def no_op(loss_tensors):
 	"""no op on input"""
