@@ -69,13 +69,18 @@ class DataLoader(data.DataLoader):
 	"""normal data loader except with options for distributed data batch sampling + wrap around"""
 	def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None, batch_sampler=None,
 				 num_workers=0, collate_fn=default_collate, pin_memory=False, drop_last=False,
-				 transpose=False, world_size=2, rank=-1, distributed=False, wrap_last=True):
+				 transpose=False, world_size=2, rank=-1, distributed=False, wrap_last=True,
+				 timeout=0, worker_init_fn=None):
 		self.dataset = dataset
 		self.batch_size = batch_size
 		self.num_workers = num_workers
 		self.collate_fn = collate_fn
 		self.pin_memory = pin_memory
 		self.drop_last = drop_last
+		self.timeout = timeout
+		self.worker_init_fn = worker_init_fn
+		if timeout < 0:
+			raise ValueError('timeout option should be non-negative')
 
 		if batch_sampler is not None:
 			if batch_size > 1 or shuffle or sampler is not None or drop_last:
@@ -84,6 +89,10 @@ class DataLoader(data.DataLoader):
 
 		if sampler is not None and shuffle:
 			raise ValueError('sampler is mutually exclusive with shuffle')
+
+		if self.num_workers < 0:
+			raise ValueError('num_workers cannot be negative; '
+							 'use num_workers=0 to disable multiprocessing.')
 
 		if batch_sampler is None:
 			if sampler is None:

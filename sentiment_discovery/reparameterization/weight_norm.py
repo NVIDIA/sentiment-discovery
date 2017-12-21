@@ -31,7 +31,7 @@ class WeightNorm(Reparameterization):
 	channel/plane. To compute a norm over the entire weight tensor, use
 	`dim=None`.
 	"""
-	def compute_weight(self, module):
+	def compute_weight(self, module=None, name=None):
 		"""
 		Computes weight normalized weight value to assign value to module attribute
 		with name `name`.
@@ -40,8 +40,13 @@ class WeightNorm(Reparameterization):
 		Returns:
 			w (Tensor): Tensor object containing value of reparameterized weight
 		"""
-		g = getattr(module, self.name + '_g')
-		v = getattr(module, self.name + '_v')
+		if module is None:
+			module = self.module
+		if name is None:
+			name = self.name
+		module, name = Reparameterization.get_module_and_name(module, name)
+		g = getattr(module, name + '_g')
+		v = getattr(module, name + '_v')
 		w = (v * (g / _norm(v, self.dim)))
 		return w
 

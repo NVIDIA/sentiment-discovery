@@ -5,6 +5,7 @@ import numpy as np
 from sentiment_discovery.reparameterization import apply_weight_norm, remove_weight_norm
 from torch.nn.parallel import DataParallel, DistributedDataParallel
 from .utils import copy_state, clip_gradients, calc_grad_norm, clip_gradient
+from .fp16 import FP16_Module, FP16_Optimizer, fp16_to_fp32, fp32_to_fp16
 
 def no_op(loss_tensors):
 	"""no op on input"""
@@ -80,6 +81,8 @@ class ModelWrapper(object):
 
 		self._should_skip = False
 
+		self.fp16 = False
+
 	def apply_weight_norm(self):
 		"""applies weight norm to all module parameters"""
 		# if lstm_only apply weight norm only to the lienar gates of lstm
@@ -100,7 +103,7 @@ class ModelWrapper(object):
 			optimizer (torch.optim.Optimizer): either optim class to optimize module parameters or, optimizer
 				instance for module parameters. If None is provided then no optimization is done. Default: None
 			load_optim (bool): if optimizer is optimizer class instance then load_optim must be true.
-				Useful for reloading optimizers from past training runs. Default: False.
+				Meant for reloading optimizers from past training runs. Default: False.
 			lr (float): learning rate for newly created optimizer. Must be provided if load_optim is
 				false and optimizer is not None.
 			clip (float): clamp module parameter gradients to +/- clip
@@ -111,8 +114,14 @@ class ModelWrapper(object):
 			self.optimizer = optimizer
 		else:
 			assert lr is not None
+			# if self.fp16:
+			# 	self.optimizer = FP16_Optimizer(optimizer, self.module, lr=lr)
+			# else:
 			self.optimizer = optimizer(self.parameters(), lr=lr)
-		self.clip = clip
+		if self.fp16:
+			self.optimizer = FP16_Optimizer(self.optimizer, self.module)
+		if clip > 0:
+			self.clip = clip
 
 	def initialize(self, batch_size, volatile=False):
 		"""initialize hidden state of module"""
@@ -153,7 +162,7 @@ class ModelWrapper(object):
 
 	def cpu(self):
 		"""mimic nn.Module.cpu"""
-		self.module.cpu()
+		self.module = self.module.cpu()
 		self.cpu_state()
 		self.cpu_loss()
 		self.using_cuda = False
@@ -167,6 +176,17 @@ class ModelWrapper(object):
 		"""move loss to cpu (necessary if loss is weighted)"""
 		if self.loss_fn is not None:
 			self.loss_fn.cuda()
+
+	def half(self):
+		# data parallel must be enabled after fp16 is turned on
+		assert not self.data_parallel
+		self.module = self.module.half()
+		old_forward = self.module.forward
+		def fp16_forward(*inputs, **kwargs):
+			return fp16_to_fp32(old_forward(*(fp32_to_fp16(inputs)), **kwargs))
+		self.module.forward = fp16_forward
+		self.fp16 = True
+
 	def make_data_parallel(self, device_ids=None, output_device=None, dim=0, distributed=False,
 							rank=-1, world_size=2):
 		"""make module attribute data parallel"""

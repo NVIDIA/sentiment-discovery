@@ -25,7 +25,7 @@ class Reparameterization(object):
 		self.backward_hook_key = None
 		self.module = module
 
-	def compute_weight(self, module):
+	def compute_weight(self, module=None, name=None):
 		"""
 		Computes reparameterized weight value to assign value to module attribute
 		with name `name`.
@@ -61,11 +61,15 @@ class Reparameterization(object):
 		"""
 		if reparameterization is None:
 			reparameterization = Reparameterization
-		name2use, module2use = Reparameterization.get_name_and_module(module, name)
+		module2use, name2use = Reparameterization.get_module_and_name(module, name)
+		# does not work on sparse
 		if name2use is None or isinstance(module2use, (torch.nn.Embedding, torch.nn.EmbeddingBag)):
 			return
 
-		fn = reparameterization(name2use, dim, module2use, retain_forward=retain_forward)
+		if hook_child:
+			fn = reparameterization(name2use, dim, module2use, retain_forward=retain_forward)
+		else:
+			fn = reparameterization(name, dim, module, retain_forward=retain_forward)
 
 		weight = getattr(module2use, name2use)
 		if weight.dim() <= 1:
@@ -98,7 +102,7 @@ class Reparameterization(object):
 		return fn
 
 	@staticmethod
-	def get_name_and_module(module, name):
+	def get_module_and_name(module, name):
 		"""
 		recursively fetches (possible) child module and name of weight to be reparameterized
 		"""
@@ -114,7 +118,7 @@ class Reparameterization(object):
 			for i in range(len(names)-1):
 				module2use = getattr(module2use, name2use)
 				name2use = names[i+1]
-		return name2use, module2use
+		return module2use, name2use
 
 	def get_params(self, module):
 		"""gets params of reparameterization based on known attribute names"""
@@ -122,28 +126,30 @@ class Reparameterization(object):
 
 	def remove(self, module):
 		"""removes reparameterization and backward hook (does not remove forward hook)"""
-		for p in self.get_params(self.module):
+		module2use, name2use = Reparameterization.get_module_and_name(module, self.name)
+		for p in self.get_params(module2use):
 			p.requires_grad = False
-		weight = self.compute_weight(self.module)
-		delattr(self.module, self.name)
+		weight = self.compute_weight(module2use, name2use)
+		delattr(module2use, name2use)
 		for n in self.reparameterization_names:
-			del self.module._parameters[n]
-		self.module.register_parameter(self.name, Parameter(weight.data))
+			del module2use._parameters[n]
+		module2use.register_parameter(name2use, Parameter(weight.data))
 		del module._backward_hooks[self.backward_hook_key]
 
 	def __call__(self, module, inputs):
 		"""callable hook for forward pass"""
-		sys.stdout.flush()
-		_w = getattr(self.module, self.name)
+		module2use, name2use = Reparameterization.get_module_and_name(module, self.name)
+		_w = getattr(module2use, name2use)
 		if not self.evaluated or _w is None:
-			setattr(self.module, self.name, self.compute_weight(self.module))
+			setattr(module2use, name2use, self.compute_weight(module2use, name2use))
 			self.evaluated = True
 
 	def backward_hook(self, module, grad_input, grad_output):
 		"""callable hook for backward pass"""
-		wn = getattr(self.module, self.name)
+		module2use, name2use = Reparameterization.get_module_and_name(module, self.name)
+		wn = getattr(module2use, name2use)
 		if wn is not None and not self.retain_forward and self.evaluated:
 			del wn.grad
 			wn.grad = None
-			setattr(self.module, self.name, None)
+			setattr(module2use, name2use, None)
 		self.evaluated = False

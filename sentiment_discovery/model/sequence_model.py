@@ -92,6 +92,7 @@ class SequenceModel(nn.Module):
 			hidden = hidden_init
 		else:
 			hidden_is_tuple = isinstance(hidden_init, tuple)
+			# hidden_is_tuple = isinstance(hidden_init, (tuple, list))
 			if 'transpose' not in kwargs or kwargs['transpose']:
 				hidden_init = tuple([y.transpose(0, 1) for y in hidden_init]) if hidden_is_tuple \
 								else hidden_init.transpose(0, 1)
@@ -190,6 +191,7 @@ class SequenceModel(nn.Module):
 		outputs = []
 
 		# iterate over sequence
+		# print(x.get_device(), self.embedder.weight.get_device(), [x.get_device() for x in self.rnn.parameters()])
 		for t in range(num_iters):
 			# embed t'th data point
 			emb = self.embedder(x[:,t])
@@ -198,7 +200,7 @@ class SequenceModel(nn.Module):
 
 			#handle reseting/persistence of states
 			if mask_state:
-				hidden_mask = state_mask[:,t].float().unsqueeze(1)
+				hidden_mask = state_mask[:,t].type_as(cell_state.data).unsqueeze(1)
 				hidden_mask = hidden_mask.expand_as(cell_state)
 
 				# maybe reset, maybe persist cell state based on mask
@@ -213,7 +215,7 @@ class SequenceModel(nn.Module):
 			#mask output if the sequence has ended and we're past the sequence legnth according to timesteps.
 			#propagate hidden state/output from last valid token in sequence
 			if seq_mask:
-				dont_mask = (t < timesteps).float().unsqueeze(1)
+				dont_mask = (t < timesteps).type_as(cell_state.data).unsqueeze(1)
 				cell_dont_mask = dont_mask.expand_as(cell_state)
 				dont_mask = dont_mask.expand_as(_output)
 				if t != 0:
