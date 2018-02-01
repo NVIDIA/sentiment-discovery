@@ -399,13 +399,19 @@ class ModelWrapper(object):
 	def state_dict(self, destination=None, prefix='', keep_vars=False):
 		"""mimic nn.Module.state_dict()"""
 		if self.weight_norm:
-			self.remove_weight_norm()
 			sd = self.module.state_dict(destination=destination, prefix=prefix, keep_vars=keep_vars)
-			self.apply_weight_norm()
 		else:
 			sd = self.module.state_dict(destination=destination, prefix=prefix, keep_vars=keep_vars)
 		return sd
 
 	def load_state_dict(self, state_dict, strict=True):
 		"""mimic nn.Module.load_state_dict()"""
-		self.module.load_state_dict(state_dict, strict=strict)
+                try:
+		    self.module.load_state_dict(state_dict, strict=strict)
+                except:
+                    try:
+                        self.remove_weight_norm()
+                        self.module.load_state_dict(state_dict, strict=strict)
+                        self.apply_weight_norm()
+                    except:
+                        raise Exception('state_dict not formatted for weight_norm=%s and lstm_only=%s'%(self.weight_norm, self.lstm_only)) 

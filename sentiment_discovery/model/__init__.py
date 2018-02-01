@@ -17,12 +17,12 @@ def make_model(cell_type='mlstm', num_layers=1, embed_size=64,
 							rnn_size=hidden_size, out_size=data_size,
 							dropout=dropout, fused=fused)
 	model = ModelWrapper(recurrent_module, lstm_only=lstm_only)
+	if weight_norm:
+		model.apply_weight_norm()
 
 	chkpt = None
 	if saved_path != '':
 		chkpt = restore(model, saved_path)
 
-	if weight_norm:
-		model.apply_weight_norm()
 
 	return model, recurrent_module, emb_module, chkpt
