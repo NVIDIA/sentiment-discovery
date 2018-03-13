@@ -1,5 +1,5 @@
 # Data Parallel Scalability
-**These scalability results are for PyTorch 0.2.0, we're working on updated results for 0.3.0. Thanks for your Patience.**
+**These scalability results are for PyTorch 0.2.0, we're working on updated results for >=0.3.0. Thanks for your Patience.**
 Training a model on an amazon-review-sized dataset is a significant time investment. In order to improve our ability to iterate on experiments we found it imperative early on to investigate the scalability of data parallelism in PyTorch. The model was trained on Tesla V100's (volta), Tesla P100's (pascal), and VCA 6000's (maxwell), with a batch size of 32 per gpu, in order to benchmark wall-time processing speed (in characters/second) against OpenAI's reported speed of 12.5k characters/second. Four of our pascall-class gpus achieved a combined speed of 13.4k characters/second.
 
 ![scaling graph](../figures/both_scalability.png "(Distributed) Data Parallelism Scalability")
