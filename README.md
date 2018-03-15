@@ -58,7 +58,7 @@ Install the sentiment_discovery package with `pip setup.py install` in order to 
 ### Python Requirements
 At this time we only support python3.
  * numpy
- * pytorch (>= 0.4.0)
+ * pytorch (>= 0.4.0) (top of tree as of 3/13/2018)
  * pandas
  * scikit-learn
  * matplotlib
@@ -109,7 +109,8 @@ python3 main.py --model LSTM --nhid 512                                       #t
 python3 main.py --fp16 --dynamic_loss_scale                                   #train a model with fp16
 python3 -m multiproc main.py                                                  #distributed model training
 python3 main.py --data .data/amazon/reviews.json --lazy --loose_json \        #train a model on amazon data
---text_key reviewText --label_key overall --num_shards 1002 --split 1000,1,1  
+--text_key reviewText --label_key overall --num_shards 1002 \
+--optim Adam --split 1000,1,1  
 ```
 
 For more documentation of our language modeling functionality look [here](./script_docs/modeling.md)
