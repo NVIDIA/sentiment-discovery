@@ -29,7 +29,9 @@ def make_loaders(opt):
     eval_seq_length = opt.eval_seq_length
     if opt.eval_seq_length < 0:
         eval_seq_length = eval_seq_length * opt.world_size
-    data_loader_args = {'num_workers': 10, 'shuffle': opt.shuffle, 'batch_size': batch_size,
+    # TODO: fix data race in lazy loader
+    # data_loader_args = {'num_workers': 10, 'shuffle': opt.shuffle, 'batch_size': batch_size,
+    data_loader_args = {'num_workers': 1, 'shuffle': opt.shuffle, 'batch_size': batch_size,
                     'pin_memory': True, 'transpose': opt.transpose, 'distributed': opt.world_size > 1,
                     'rank': opt.rank, 'world_size': opt.world_size, 'drop_last': opt.world_size > 1}
     split = get_split(opt)

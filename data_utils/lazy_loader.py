@@ -86,8 +86,10 @@ class lazy_array_loader(object):
 
     def file_read(self, start=0, end=None):
         """read specified portion of file"""
+        #TODO: Solve race condition
         #Seek to start of file read
         self.file.seek(start)
+        ##### Getting context-switched here
         #read to end of file if no end point provided
         if end is None:
             rtn = self.file.read()

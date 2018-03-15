@@ -213,8 +213,6 @@ def train(total_iters=0):
     for i, batch in enumerate(train_data):
 
         data, targets, reset_mask = get_batch(batch)
-        # Starting each batch, we detach the hidden state from how it was previously produced.
-        # If we didn't, the model would try backpropagating all the way to start of the dataset.
         output, hidden = model(data, reset_mask=reset_mask)
         loss = criterion(output.view(-1, ntokens).contiguous().float(), targets.view(-1).contiguous())
 
@@ -225,6 +223,7 @@ def train(total_iters=0):
         else:
             loss.backward()
         total_loss += loss.data.float()
+
 
         # clipping gradients helps prevent the exploding gradient problem in RNNs / LSTMs.
         if args.clip > 0:
@@ -243,7 +242,7 @@ def train(total_iters=0):
             if not optim.overflow:
                 LR.step()
 
-        if i % args.log_interval == 0 and i > 0:
+        if i % args.log_interval == 0:
             cur_loss = total_loss[0] / args.log_interval
             elapsed = time.time() - start_time
             print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:.2E} | ms/batch {:.3E} | \

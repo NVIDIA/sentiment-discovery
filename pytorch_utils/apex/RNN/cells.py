@@ -57,6 +57,7 @@ def mLSTMCell(input, hidden, w_ih, w_hh, w_mih, w_mhh, b_ih=None, b_hh=None):
     mLSTMCell stub
     """
 
+    # TODO: look into fusedLSTM not getting proper results.
     if False and input.is_cuda:
         igates = F.linear(input, w_ih)
         m = F.linear(input, w_mih) * F.linear(hidden[0], w_mhh)

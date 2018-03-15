@@ -1,4 +1,3 @@
-
 import torch
 from torch.nn.parameter import Parameter
 from ..utils import FusedNorm

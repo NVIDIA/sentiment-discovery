@@ -20,22 +20,18 @@ class DistributedDataParallel(Module):
             if(self.needs_reduction):
                 self.needs_reduction = False
                 buckets = {}
-                names=[]
                 for name, param in self.module.named_parameters():
                     if param.requires_grad and param.grad is not None:
-                        names.append(name)
                         tp = type(param.data)
                         if tp not in buckets:
                             buckets[tp] = []
                         buckets[tp].append(param)
-#                print(names)
                 if self.warn_on_half:
                     if torch.cuda.HalfTensor in buckets:
                         print("WARNING: gloo dist backend for half parameters may be extremely slow." +
                               " It is recommended to use the NCCL backend in this case.")
                         self.warn_on_half = False
 
-                grad_list = []
                 for tp in buckets:
                     bucket = buckets[tp]
                     grads = [param.grad.data for param in bucket]
@@ -45,8 +41,6 @@ class DistributedDataParallel(Module):
                     coalesced /= dist.get_world_size()
                     for buf, synced in zip(grads, _unflatten_dense_tensors(coalesced, grads)):
                         buf.copy_(synced)
-                        grad_list.append(synced.max())
-#                print('gl',grad_list,'gle')
         self.hook_handles = []
         self.hooks = []
         for param in list(self.module.parameters()):
