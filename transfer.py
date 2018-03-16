@@ -9,6 +9,10 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+
 import numpy as np
 from sklearn.linear_model import LogisticRegression
 
@@ -218,28 +222,77 @@ def train_logreg(trX, trY, vaX=None, vaY=None, teX=None, teY=None, penalty='l1',
     return model, scores, probs, c, nnotzero
 
 def get_top_k_neuron_weights(model, k=1):
-	"""
-	Get's the indices of the top weights based on the l1 norm contributions of the weights
-	based off of https://rakeshchada.github.io/Sentiment-Neuron.html interpretation of
-	https://arxiv.org/pdf/1704.01444.pdf (Radford et. al)
-	Args:
-		weights: numpy arraylike of shape `[d,num_classes]`
-		k: integer specifying how many rows of weights to select
-	Returns:
-		k_indices: numpy arraylike of shape `[k]` specifying indices of the top k rows
-	"""
-	weights = model.coef_.T
-	weight_penalties = np.squeeze(np.linalg.norm(weights, ord=1, axis=1))
-	if k == 1:
-		k_indices = np.array([np.argmax(weight_penalties)])
-	elif k >= np.log(len(weight_penalties)):
-		# runs O(nlogn)
-		k_indices = np.argsort(weight_penalties)[-k:][::-1]
-	else:
-		# runs O(n+klogk)
-		k_indices = np.argpartition(weight_penalties, -k)[-k:]
-		k_indices = (k_indices[np.argsort(weight_penalties[k_indices])])[::-1]
-	return k_indices
+    """
+    Get's the indices of the top weights based on the l1 norm contributions of the weights
+    based off of https://rakeshchada.github.io/Sentiment-Neuron.html interpretation of
+    https://arxiv.org/pdf/1704.01444.pdf (Radford et. al)
+    Args:
+        weights: numpy arraylike of shape `[d,num_classes]`
+        k: integer specifying how many rows of weights to select
+    Returns:
+        k_indices: numpy arraylike of shape `[k]` specifying indices of the top k rows
+    """
+    weights = model.coef_.T
+    weight_penalties = np.squeeze(np.linalg.norm(weights, ord=1, axis=1))
+    if k == 1:
+        k_indices = np.array([np.argmax(weight_penalties)])
+    elif k >= np.log(len(weight_penalties)):
+        # runs O(nlogn)
+        k_indices = np.argsort(weight_penalties)[-k:][::-1]
+    else:
+        # runs O(n+klogk)
+        k_indices = np.argpartition(weight_penalties, -k)[-k:]
+        k_indices = (k_indices[np.argsort(weight_penalties[k_indices])])[::-1]
+    return k_indices
+
+def plot_logits(save_root, X, Y_pred, top_neurons):
+    """plot logits and save to appropriate experiment directory"""
+    save_root = os.path.join(save_root,'logit_vis')
+    if not os.path.exists(save_root):
+        os.makedirs(save_root)
+
+    print('plotting_logits at', save_root)
+
+    for i, n in enumerate(top_neurons):
+        plot_logit_and_save(trXt, trY, n, os.path.join(save_root, str(i)+'_'+str(n)))
+
+
+def plot_logit_and_save(logits, labels, logit_index, name):
+    """
+    Plots histogram (wrt to what label it is) of logit corresponding to logit_index.
+    Saves plotted histogram to name.
+
+    Args:
+        logits:
+        labels:
+        logit_index:
+        name:
+"""
+    logit = logits[:,logit_index]
+    plt.title('Distribution of Logit Values')
+    plt.ylabel('# of logits per bin')
+    plt.xlabel('Logit Value')
+    plt.hist(logit[labels < .5], bins=25, alpha=0.5, label='neg')
+    plt.hist(logit[labels >= .5], bins=25, alpha=0.5, label='pos')
+    plt.legend()
+    plt.savefig(name+'.png')
+    plt.clf()
+
+def plot_weight_contribs_and_save(coef, name):
+    plt.title('Values of Resulting L1 Penalized Weights')
+    plt.tick_params(axis='both', which='major')
+    coef = normalize(coef)
+    plt.plot(range(len(coef[0])), coef.T)
+    plt.xlabel('Neuron (Feature) Index')
+    plt.ylabel('Neuron (Feature) weight')
+    print('saving weight visualization to', name)
+    plt.savefig(name)
+    plt.clf()
+
+def normalize(coef):
+    norm = np.linalg.norm(coef)
+    coef = coef/norm
+    return coef
 
 save_root = args.load_model
 save_root = save_root.replace('.current', '')
@@ -341,6 +394,20 @@ with open(os.path.join(save_root, 'neurons.pkl'), 'wb') as f:
 
 with open(os.path.join(save_root, 'neuron_bias.pkl'), 'wb') as f:
     pkl.dump(logreg_model.intercept_, f)
+
+#Plot feats
+use_feats, use_labels = teXt, teY
+if use_feats is None:
+    use_feats, use_labels = vaXt, vaY
+if use_feats is None:
+    use_feats, use_labels = trXt, trY
+try:
+    plot_logits(save_root, use_feats, use_labels, sentiment_neurons)
+except:
+    print('no labels to plot logits for')
+
+plot_weight_contribs_and_save(logreg_model.coef_, os.path.join(save_root, 'weight_vis.png'))
+
 
 print('results successfully written to ' + save_root)
 if args.write_results == '':
