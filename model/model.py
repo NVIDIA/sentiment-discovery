@@ -78,6 +78,8 @@ class RNNFeaturizer(nn.Module):
             cell = cell[-1]
         if seq_len is not None:
             cell = cell[(seq_len-1).view(-1).contiguous(), torch.arange(cell.size(1)).long().cuda()]
+        else:
+            cell = cell[-1]
         return cell
 
     def state_dict(self, destination=None, prefix='', keep_vars=False):

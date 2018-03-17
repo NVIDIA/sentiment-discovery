@@ -120,19 +120,20 @@ class csv_dataset(data.Dataset):
 #            data = pd.read_csv(load_path, sep=delim, usecols=[text_key, label_key])
 
  #       data = data.fillna(value=-1)
+        data = pd.read_csv(load_path, sep=delim, usecols=[text_key, label_key])
 
-#        self.X = data[text_key].values.tolist()
-#        if should_process:
-#            self.X = [preprocess_fn(s, maxlen=None, encode=None) for s in self.X]
-#        if label_key in data:
-#            self.Y = data[label_key].values
-#        else:
-#            self.Y = np.ones(len(self.X))*-1
+        self.X = data[text_key].values.tolist()
+        if should_process:
+            self.X = [preprocess_fn(s, maxlen=None, encode=None) for s in self.X]
+        if label_key in data:
+            self.Y = data[label_key].values
+        else:
+            self.Y = np.ones(len(self.X))*-1
 
-#        if should_process:
-#            self.processed_path = save_preprocessed(self, text_key=text_key, label_key=label_key)
-#        else:
-#            self.processed_path = load_path
+        if should_process:
+            self.processed_path = save_preprocessed(self, text_key=text_key, label_key=label_key)
+        else:
+            self.processed_path = load_path
 
         if binarize_sent:
             self.Y = binarize_labels(self.Y, hard=binarize_sent)
