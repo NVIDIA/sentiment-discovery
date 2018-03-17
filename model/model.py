@@ -72,10 +72,14 @@ class RNNFeaturizer(nn.Module):
         self.rnn.detach_hidden()
         output, hidden = self.rnn(emb, collectHidden=True)
         cell = hidden[1]
+
+        #get cell state from layers
         if self.all_layers:
             cell = torch.cat(cell, -1)
         else:
             cell = cell[-1]
+
+        # get last valid cell state
         if seq_len is not None:
             cell = cell[(seq_len-1).view(-1).contiguous(), torch.arange(cell.size(1)).long().cuda()]
         else:

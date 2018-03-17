@@ -103,14 +103,6 @@ class csv_dataset(data.Dataset):
 
         self.X = []
         self.Y = []
-        with open(load_path,'r') as f:
-            reader = csv.reader(f, delimiter=',', quotechar='"')
-            next(reader)
-            for y,x in reader:        
-                self.X.append(x)
-                self.Y.append(int(y))
-            self.Y = np.array(self.Y).ravel()
-
 #        if drop_unlabeled:
 #            data = pd.read_csv(load_path, sep=delim, usecols=['Sentiment', text_key, label_key],
 #                encoding='unicode_escape')
