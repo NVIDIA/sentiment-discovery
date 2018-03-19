@@ -55,7 +55,7 @@ def findcuda():
 #Get some important paths
 # curdir = os.path.dirname(os.path.abspath(inspect.stack()[0][1]))
 curdir = os.path.join(os.path.dirname(os.path.realpath(__file__)),
-                      'pytorch_utils')
+                      'apex_utils')
 os.chdir(curdir)
 
 buildir = curdir+os.sep+"build"

@@ -114,7 +114,9 @@ python3 main.py --data .data/amazon/reviews.json --lazy --loose_json \        #t
 ```
 
 For more documentation of our language modeling functionality look [here](./script_docs/modeling.md)
+
 In order to appropriately set the learning rate for a given batch size see the [training reproduction](./analysis/reproduction.md#training-set-up) section in analysis.
+
 For information about how we achieve numerical stability with FP16 training see our [fp16 training](./analysis/reproduction.md#fp16-training) analysis.
 
 ### Sentiment Transfer
