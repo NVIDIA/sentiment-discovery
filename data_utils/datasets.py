@@ -112,7 +112,10 @@ class csv_dataset(data.Dataset):
 #            data = pd.read_csv(load_path, sep=delim, usecols=[text_key, label_key])
 
  #       data = data.fillna(value=-1)
-        data = pd.read_csv(load_path, sep=delim, usecols=[text_key, label_key])
+        try:
+            data = pd.read_csv(load_path, sep=delim, usecols=[text_key, label_key])
+        except:
+            data = pd.read_csv(load_path, sep=delim, usecols=[text_key])
 
         self.X = data[text_key].values.tolist()
         if should_process:

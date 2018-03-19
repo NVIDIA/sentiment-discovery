@@ -68,23 +68,32 @@ class RNNFeaturizer(nn.Module):
         self.output_size = self.nhid if not self.all_layers else self.nhid * self.nlayers
 
     def forward(self, input, seq_len=None):
-        emb = self.drop(self.encoder(input))
         self.rnn.detach_hidden()
-        output, hidden = self.rnn(emb, collectHidden=True)
-        cell = hidden[1]
+        if seq_len is None:
+            for i in range(input.size(0)):
+                emb = self.drop(self.encoder(input[i]))
+                _, hidden = self.rnn(emb.unsqueeze(0), collectHidden=True)
+            cell = self.get_cell_features(hidden)
+        else:
+            last_cell = 0
+            for i in range(input.size(0)):
+                emb = self.drop(self.encoder(input[i]))
+                _, hidden = self.rnn(emb.unsqueeze(0), collectHidden=True)
+                cell = self.get_cell_features(hidden)
+                if i > 0:
+                    cell = get_valid_outs(i, seq_len, cell, last_cell)
+                last_cell = cell   
+        return cell
 
+    def get_cell_features(self, hidden):
+        cell = hidden[1]
         #get cell state from layers
         if self.all_layers:
             cell = torch.cat(cell, -1)
         else:
             cell = cell[-1]
+        return cell[-1]
 
-        # get last valid cell state
-        if seq_len is not None:
-            cell = cell[(seq_len-1).view(-1).contiguous(), torch.arange(cell.size(1)).long().cuda()]
-        else:
-            cell = cell[-1]
-        return cell
 
     def state_dict(self, destination=None, prefix='', keep_vars=False):
         sd = {}
@@ -95,3 +104,13 @@ class RNNFeaturizer(nn.Module):
     def load_state_dict(self, state_dict, strict=True):
         self.encoder.load_state_dict(state_dict['encoder'], strict=strict)
         self.rnn.load_state_dict(state_dict['rnn'], strict=strict)
+
+def get_valid_outs(timestep, seq_len, out, last_out):
+    invalid_steps = timestep >= seq_len
+    if (invalid_steps.long().sum() == 0):
+        return out
+    return selector_circuit(out, last_out, invalid_steps)
+
+def selector_circuit(val0, val1, selections):
+    selections = selections.type_as(val0.data).view(-1, 1).contiguous()
+    return (val0*(1-selections)) + (val1*selections)
