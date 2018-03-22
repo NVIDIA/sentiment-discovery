@@ -5,6 +5,9 @@
 #
 ###############################################################################
 
+import os
+import math
+
 import argparse
 
 import torch
@@ -13,6 +16,14 @@ from torch.autograd import Variable
 from apex.reparameterization import apply_weight_norm, remove_weight_norm
 
 import model
+
+import numpy as np
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import seaborn as sns
+sns.set_style({'font.family': 'monospace'})
+
 
 parser = argparse.ArgumentParser(description='PyTorch Sentiment Discovery Generation/Visualization')
 
@@ -92,28 +103,32 @@ def get_neuron_and_polarity(sd, neuron):
     else:
         return neuron, 1
     if neuron is None:
-        val, neuron = torch.max(weight[0], 0)
+        val, neuron = torch.max(torch.abs(weight[0]), 0)
+        neuron = neuron[0]
+    val = weight[0][neuron]
+    if val >= 0:
+        polarity = 1
     else:
-        val = weight[0][neuron]
-    polarity = torch.sign(val)[0]
-    neuron = neuron[0]
+        polarity = -1
     return neuron, polarity
 
-def process_hidden(cell, neuron, mask=False, mask_value=1, polarity=1):
-    feat = cell.data[-1, :, neuron]
-#    rtn_feat = feat.clone()
+def process_hidden(cell, hidden, neuron, mask=False, mask_value=1, polarity=1):
+    feat = cell.data[:, neuron]
+    rtn_feat = feat.clone()
     if mask:
-        feat.fill_(mask_value*polarity)
-    return feat[0]
+#        feat.fill_(mask_value*polarity)
+        hidden.data[:, neuron].fill_(mask_value*polarity)
+    return rtn_feat[0]
 
 def model_step(model, input, neuron=None, mask=False, mask_value=1, polarity=1):
-    out, hidden = model(input)
-    if isinstance(hidden, tuple):
-        hidden, cell = hidden
-    else:
-        hidden = cell = hidden
+    out, _ = model(input)
     if neuron is not None:
-        feat = process_hidden(cell, neuron, mask, mask_value, polarity)
+        hidden = model.rnn.rnns[-1].hidden
+        if len(hidden) > 1:
+            hidden, cell = hidden
+        else:
+            hidden = cell = hidden
+        feat = process_hidden(cell, hidden, neuron, mask, mask_value, polarity)
         return out, feat
     return out
 
@@ -135,16 +150,17 @@ def process_text(text, model, input, temperature, neuron=None, mask=False, overw
             vals.append(val)
         else:
             ch = model_step(model, input, neuron, mask, overwrite, polarity)
-        ch = sample(ch, temperature)
-    input.data.fill_(ch)
+#        ch = sample(ch, temperature)
+    input.data.fill_(sample(ch, temperature))
     chrs = list(text)
-    chrs.append(chr(ch))
+#    chrs.append(chr(ch))
     return chrs, vals
 
 def generate(gen_length, model, input, temperature, neuron=None, mask=False, overwrite=1, polarity=1):
     chrs = []
     vals = []
     for i in range(gen_length):
+        chrs.append(chr(input.data[0]))
         if neuron:
             ch, val = model_step(model, input, neuron, mask, overwrite, polarity)
             vals.append(val)
@@ -152,11 +168,36 @@ def generate(gen_length, model, input, temperature, neuron=None, mask=False, ove
             ch = model_step(model, input, neuron, mask, overwrite, polarity)
         ch = sample(ch, temperature)
         input.data.fill_(ch)
-        chrs.append(chr(ch))
+#        chrs.append(chr(ch))
+#    chrs.pop()
     return chrs, vals
 
-def make_heatmap(outvals, save=None, polarity=1):
-    pass
+def make_heatmap(text, values, save=None, polarity=1):
+    cell_height=.325
+    cell_width=.15
+    n_limit = 74
+    text = list(map(lambda x: x.replace('\n', '\\n'), text))
+    num_chars = len(text)
+    total_chars = math.ceil(num_chars/float(n_limit))*n_limit
+    mask = np.array([0]*num_chars + [1]*(total_chars-num_chars))
+    text = np.array(text+[' ']*(total_chars-num_chars))
+    values = np.array(values+[0]*(total_chars-num_chars))
+    values *= polarity
+
+    values = values.reshape(-1, n_limit)
+    text = text.reshape(-1, n_limit)
+    mask = mask.reshape(-1, n_limit)
+    num_rows = len(values)
+    plt.figure(figsize=(cell_width*n_limit, cell_height*num_rows))
+    hmap=sns.heatmap(values, annot=text, mask=mask, fmt='', vmin=-1, vmax=1, cmap='RdYlGn',
+                     xticklabels=False, yticklabels=False, cbar=False)
+    plt.tight_layout()
+    if save is not None:
+        plt.savefig(save)
+    # clear plot for next graph since we returned `hmap`
+    plt.clf()
+    return hmap
+
 
 neuron, polarity = get_neuron_and_polarity(sd, args.neuron)
 neuron = neuron if args.visualize or args.overwrite is not None else None
@@ -174,32 +215,21 @@ if neuron is not None:
     out = out[0]
 input.data.fill_(sample(out, args.temperature))
 
-outstr = []
+outchrs = []
 outvals = []
 #with open(args.save, 'w') as outf:
 with torch.no_grad():
     if args.text != '':
         chrs, vals = process_text(args.text, model, input, args.temperature, neuron, mask, args.overwrite, polarity)
-        outstr += chrs
+        outchrs += chrs
         outvals += vals
     chrs, vals = generate(args.gen_length, model, input, args.temperature, neuron, mask, args.overwrite, polarity)
-    outstr += chrs
+    outchrs += chrs
     outvals += vals
-outstr = ''.join(outstr)
+outstr = ''.join(outchrs)
 print(outstr)
 with open(args.save, 'w') as f:
     f.write(outstr)
 
 if args.visualize:
-    make_heatmap(outvals, args.save, polarity)
-#    for i in range(args.gen_length):
-#        output, _ = model(input)
-#        word_weights = output.squeeze().data.div(args.temperature).exp().cpu()
-#        char_idx = torch.multinomial(word_weights, 1)[0]
-#        input.data.fill_(char_idx)
-#        character = chr(char_idx)
-#
-#        outf.write(character + ('\n' if i % 20 == 19 else ' '))
-#
-#        if i % args.log_interval == 0:
-#            print('| Generated {}/{} words'.format(i, args.gen_length))
+    make_heatmap(outchrs, outvals, os.path.splitext(args.save)[0]+'.png', polarity)

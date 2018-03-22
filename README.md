@@ -154,7 +154,7 @@ The basic functionality generates text up to a specified number of tokens given 
 python generate.py --load_model <path2classifier.pt>t --gen_length 1000      #generates 1000-token long text from a given model
 ```
 
-Beyond that, this script can also be used to analyze activation heatmaps of a particular sentiment neuron given a trained AND transfered language model. **TEMPORARILY DEPRECATED**
+Beyond that, this script can also be used to analyze activation heatmaps of a particular sentiment neuron given a trained AND transfered language model.
 
 By default the maximally contributing neuron during past regression transfers is used to generate these heatmaps (as seen below)
 
@@ -195,7 +195,6 @@ python3 generate.py --load_model <path2classifier.pt> --gen_length 200 --heatmap
 ![negated neuron](./figures/heat_gen_negate_overwrite.png "Generated Negated Sentiment Heatmaps")
 
 More documentation on text generation and heatmap analysis is available [here](./script_docs/generate.md)
-**NOTE THAT HEATMAP FUNCTIONALITY IS CURRENTLY UNAVAILABLE**
  
 ## [Analysis](./analysis/)
  * [Why Unsupervised Language Modeling?](./analysis/unsupervised.md)
