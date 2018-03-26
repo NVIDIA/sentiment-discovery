@@ -1,6 +1,6 @@
 import torch
 from torch.nn.parameter import Parameter
-from ..utils import FusedNorm
+#from ..utils import FusedNorm
 import time
 
 from .reparameterization import Reparameterization
@@ -53,27 +53,12 @@ class WeightNorm(Reparameterization):
         g = getattr(module, name + '_g')
         v = getattr(module, name + '_v')
 
-        # torch.cuda.nvtx.range_push("compute_weight, v.size() = {}".format(v.size()))
-        # torch.cuda.synchronize()
-        # start = time.time()
+        w = (v * (g / _norm(v, self.dim)))
 
-        # if isinstance(g.data, HALF_TYPES) or isinstance(v.data, HALF_TYPES):
-        #     self.fp16 = True
-        #     g.data = g.data.float()
-        #     v.data = v.data.float()
-        # w = (v * (g / _norm(v, self.dim)))
-        # if hasattr(self, 'fp16') and self.fp16:
-        #     w = w.half()
+        #fused_norm = FusedNorm.apply
+        #v = v.contiguous()
+        #w = g*fused_norm(v)
 
-        # print( "Using mine" )
-        fused_norm = FusedNorm.apply
-        v = v.contiguous()
-        w = g*fused_norm(v)
-
-        # torch.cuda.synchronize()
-        # end=time.time()
-        # print("Time for weightnorm fwd {} = {}".format(v.size(), end-start))
-        # torch.cuda.nvtx.range_pop()
 
         return w
 

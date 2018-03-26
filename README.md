@@ -53,7 +53,7 @@ Samples from the tails of the feature distribution correlate strongly with posit
 
 ## Setup
 ### Install
-Install the sentiment_discovery package with `pip setup.py install` in order to run the modules/scripts within this repo.
+Install the sentiment_discovery package with `python3 setup.py install` in order to run the modules/scripts within this repo.
 
 ### Python Requirements
 At this time we only support python3.
@@ -63,6 +63,8 @@ At this time we only support python3.
  * scikit-learn
  * matplotlib
  * unidecode
+
+In order to install pytorch>=0.4.0 build pytorch from [source](https://github.com/pytorch/pytorch#from-source)
 
 ### Pretrained models
 We've included our trained 4096-d mlstm models in both fp16 and fp32:

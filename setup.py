@@ -148,26 +148,26 @@ def CompileCudaFiles():
         for object_file in object_files:
             extra_link_args.append(object_file)
 
-print()
-print("Arguments used to build CUDA extension:")
-print("extra_compile_args :", extra_compile_args)
-print("include_dirs: ", include_dirs)
-print("extra_link_args: ", extra_link_args)
-print("library_dirs: ", library_dirs)
-print("libraries: ", main_libraries)
-print()
-CompileCudaFiles()
+#print()
+#print("Arguments used to build CUDA extension:")
+#print("extra_compile_args :", extra_compile_args)
+#print("include_dirs: ", include_dirs)
+#print("extra_link_args: ", extra_link_args)
+#print("library_dirs: ", library_dirs)
+#print("libraries: ", main_libraries)
+#print()
+#CompileCudaFiles()
 
-print("Building CUDA extension.")
-cuda_ext = Extension('apex._C',
-                 [os.path.join('csrc', 'Module.cpp')],
-                 extra_compile_args = extra_compile_args,
-                 include_dirs=include_dirs,
-                 extra_link_args=extra_link_args,
-                 library_dirs=library_dirs,
-                 runtime_library_dirs = library_dirs,
-                 libraries=main_libraries
-      )
+#print("Building CUDA extension.")
+#cuda_ext = Extension('apex._C',
+#                 [os.path.join('csrc', 'Module.cpp')],
+#                 extra_compile_args = extra_compile_args,
+#                 include_dirs=include_dirs,
+#                 extra_link_args=extra_link_args,
+#                 library_dirs=library_dirs,
+#                 runtime_library_dirs = library_dirs,
+#                 libraries=main_libraries
+#      )
 
 print("Building module.")
 setup(
@@ -175,7 +175,7 @@ setup(
     cmdclass={
         'clean' : RMBuild,
     },  
-    ext_modules=[cuda_ext,],
+#    ext_modules=[cuda_ext,],
     description='PyTorch Extensions written by NVIDIA',
     packages=find_packages(where='.',
                            exclude=("build", "csrc", "include", "tests")),
