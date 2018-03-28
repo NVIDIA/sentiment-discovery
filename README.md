@@ -3,6 +3,8 @@ This codebase is part of our effort to reproduce, analyze, and scale the [Genera
 
 Using reduced precision FP16 arithmetic and tensorcore architecture, the model trains in **<1 day** on 8 volta-class gpus down from the training time of 1 month reported in the paper.
 
+![training time comparison](./figures/amazon_train_time.png)
+
 A byte-level (char-level) recurrent language model ([multiplicative LSTM](https://arxiv.org/abs/1609.07959)) for unsupervised modeling of large text datasets, such as the [amazon-review dataset](http://jmcauley.ucsd.edu/data/amazon/), is implemented in PyTorch. 
 
 The learned language model can be transferred to other natural language processing (NLP) tasks where it is used to featurize text samples. The featurizations provide a strong initialization point for discriminative language tasks, and allow for competitive task performance given only a few labeled samples. To illustrate this the model is transferred to the [Binary Stanford Sentiment Treebank task](https://nlp.stanford.edu/sentiment/treebank.html).
@@ -33,6 +35,7 @@ Samples from the tails of the feature distribution correlate strongly with posit
      * [FP16 Training Information](./analysis/reproduction.md#fp16-training)
    * [Sentiment Transfer](#sentiment-transfer)
      * [Transfer Documentation](./script_docs/transfer.md)
+     * [Transferin]()
    * [Generation and Heatmap Visualization](#generation-and-heatmap-visualization)
      * [Generation Documentation](./script_docs/generation.md)
  * [Analysis](#analysis--)
@@ -44,6 +47,7 @@ Samples from the tails of the feature distribution correlate strongly with posit
 	   * [Training](./analysis/reproduction.md#training)
 	      * [Training Setup](./analysis/reproduction.md#training-set-up)
 	   * [FP16 Training](./analysis/reproduction.md#fp16-training)
+	   * [8K Model Training](./analysis/reproduction.md#going-bigger-with-large-models)
 	   * [Transfer](./analysis/reproduction.md#transfer)
 	* [Data Parallel Scalability](./analysis/scale.md)
 	   * [PyTorch + GIL](./analysis/scale.md#pytorch-gil)
@@ -72,6 +76,10 @@ We've included our trained 4096-d mlstm models in both fp16 and fp32:
  * [Binary SST (FP16)](https://drive.google.com/file/d/1zwf5aZjy71LsTQD6t3Y5mfcINYqMj0VL/view?usp=sharing) [163MB]
  * [IMDB](https://drive.google.com/file/d/1kFclfuVVTYDwqa0s0_yGtls5HBHVt5uh/view?usp=sharing) [329MB]
  * [IMDB (FP16)](https://drive.google.com/file/d/1xWJRH18Z_E_aic80CdrAoXM1FsY_ZNfo/view?usp=sharing) [163MB]
+
+We've also included our trained 8192-d mlstm models in fp16:
+ * [Binary SST (FP16)]() [649 MB]
+ * [IMDB (FP16)]() [649 MB]
  
 Each file contains a PyTorch `state_dict` consisting of a language model (encoder+decoder keys) trained on Amazon reviews and a binary sentiment classifier (classifier key) trained with transfer learning on Binary SST/IMDB.
 
@@ -115,6 +123,10 @@ python3 main.py --data .data/amazon/reviews.json --lazy --loose_json \        #t
 --optim Adam --split 1000,1,1  
 ```
 
+Amazon Review BPC should assymptotically reach similar values after 1 epoch for the given sizes
+
+![BPC size training comparison](./figures/size_comparison.png)
+
 For more documentation of our language modeling functionality look [here](./script_docs/modeling.md)
 
 In order to appropriately set the learning rate for a given batch size see the [training reproduction](./analysis/reproduction.md#training-set-up) section in analysis.
@@ -133,19 +145,9 @@ python3 transfer.py --load_model <model>.pt --neurons 5                   #use 5
 python3 transfer.py --load_model <model>.pt --fp16                        #run model in fp16 for featurization step
 ```
 
-Below is sample output from a fully trained model on Binary SST.
+Expected output transfering fully trained models to sentiment classification for given size:
 
-```
-all neuron regression took 26.882004499435425 seconds
-92.3121387283237, 92.66055045871559, 91.70785282811642 train, val, test accuracy for all neuron regression
-0.25 regularization coefficient used
-146 features used in all neuron regression
-
-using neuron(s) 2388 as features for regression
-1 neuron regression took 0.05171680450439453 seconds
-88.42485549132948, 89.3348623853211, 88.5227896760022 train, val, test accuracy for 1 neuron regression
-0.03125 regularization coefficient used
-```
+![Sentiment Transfer Performance](./figures/sentiment_performance.png)
 
 Additional documentation of the command line arguments available for transfer can be found [here](./script_docs/transfer.md)
 
@@ -207,6 +209,7 @@ More documentation on text generation and heatmap analysis is available [here](.
    * [Training](./analysis/reproduction.md#training)
      * [Training Setup](./analysis/reproduction.md#training-set-up)
    * [FP16 Training](./analysis/reproduction.md#fp16-training) 
+   * [8K Model Training](./analysis/reproduction.md#going-bigger-with-large-models)
    * [Transfer](./analysis/reproduction.md#transfer)
  * [Data Parallel Scalability](./analysis/scale.md)
    * [PyTorch + GIL](./analysis/scale.md#pytorch-gil)

@@ -43,6 +43,19 @@ We also establish other best practices that did not directly affect our results,
  * **FP32 loss reduction**: Any reduction/averaging of more than 65k terms will be met with a dynamic range problem, so we convert any loss scalars to float as a relatively inexpensive safety measure.
  * **FP32 normalization**: Any l2 norm greater than 256 will have a dynamic range problem while computing the norm. As such, we develop a FusedNorm kernel which exponentiates and accumulates values into FP32 before returning the final norm in FP16. This kernel is utilized to perform weight normalization.
 
+Using these techniques we are able to achieve comparable convergence numbers in fp32 and fp16 as shown below.
+
+![fp16 convergence results](../figures/16vs32.png "Fp16 vs Fp32 convergence figure")
+
+## Going Bigger with Large Models
+We also analyzed the effect of various model sizes on performance.
+
+We utilize FP16's increased speed and reduced memory footprint to train a model with a hidden state size of 8k.
+
+This allows us to further improve on the State of The Art Performance on Amazon Review language modeling and sentiment classification.
+
+![SOTA Language Modeling](../figures/size_comparison.png) 
+
 ## Transfer
 We chose to reproduce transfer results with the binary Stanford Sentiment Treebank as opposed to the IMDB dataset because of its smaller size, and faster turnaround time for experiments.
 
@@ -52,7 +65,9 @@ These features are used for training a logistic regression model (via sklearn/Py
 
 The feature with the largest L1 penalty is then treated as a "sentiment neuron" to classify the samples and analyze difference in performance.
 
-**It should be noted that the our model learned a negatively correlated sentiment feature**
+**It should be noted that the our model learns negatively correlated sentiment feature**
+
+![SOTA Sentiment Performance](../figures/sentiment_performance.png)
 
 ------
 
