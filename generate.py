@@ -103,7 +103,7 @@ def get_neuron_and_polarity(sd, neuron):
     else:
         return neuron, 1
     if neuron is None:
-        val, neuron = torch.max(torch.abs(weight[0]), 0)
+        val, neuron = torch.max(torch.abs(weight[0].float()), 0)
         neuron = neuron[0]
     val = weight[0][neuron]
     if val >= 0:
