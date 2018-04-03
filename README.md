@@ -78,8 +78,8 @@ We've included our trained 4096-d mlstm models in both fp16 and fp32:
  * [IMDB (FP16)](https://drive.google.com/file/d/1xWJRH18Z_E_aic80CdrAoXM1FsY_ZNfo/view?usp=sharing) [163MB]
 
 We've also included our trained 8192-d mlstm models in fp16:
- * [Binary SST (FP16)]() [649 MB]
- * [IMDB (FP16)]() [649 MB]
+ * [Binary SST (FP16)](https://drive.google.com/open?id=15wkh6gXwSlpgYYdAJxnI3x1X9ease_xZ) [649 MB]
+ * [IMDB (FP16)](https://drive.google.com/file/d/1ffWlFazkXgZEm4XB7g3F7kHJSjn2xsM3/view?usp=sharing) [649 MB]
  
 Each file contains a PyTorch `state_dict` consisting of a language model (encoder+decoder keys) trained on Amazon reviews and a binary sentiment classifier (classifier key) trained with transfer learning on Binary SST/IMDB.
 
