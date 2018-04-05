@@ -42,7 +42,7 @@ parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                     help='report interval')
 parser.add_argument('--save', type=str,  default='lang_model.pt',
                     help='path to save the final model')
-parser.add_argument('--load', type=str,
+parser.add_argument('--load', type=str, default='',
                     help='path to a previously saved model checkpoint')
 parser.add_argument('--save_iters', type=int, default=2000, metavar='N',
                     help='save current model progress interval')
@@ -138,6 +138,8 @@ train_data, val_data, test_data = data_config.apply(args)
 
 ntokens = args.data_size
 model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.tied).cuda()
+print('* number of parameters: %d' % sum([p.nelement() for p in model.parameters()]))
+
 rnn_model = model
 
 if args.load != '':
