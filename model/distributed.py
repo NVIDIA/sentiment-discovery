@@ -2,6 +2,7 @@ import torch
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 import torch.distributed as dist
 from torch.nn.modules import Module
+from torch.autograd import Variable
 
 
 class DistributedDataParallel(Module):
@@ -45,7 +46,7 @@ class DistributedDataParallel(Module):
         self.hooks = []
         for param in list(self.module.parameters()):
             def allreduce_hook(*unused):
-                param._execution_engine.queue_callback(allreduce_params)
+                Variable._execution_engine.queue_callback(allreduce_params)
             handle = param.register_hook(allreduce_hook)
             self.hooks.append(allreduce_hook)
             self.hook_handles.append(handle)
