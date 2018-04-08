@@ -88,6 +88,7 @@ data_parser.add_argument('--test_shards', type=int, default=0,
 args = parser.parse_args()
 
 torch.backends.cudnn.enabled = False
+args.cuda = torch.cuda.is_available()
 
 # initialize distributed process group and set device
 if args.rank > 0:
@@ -101,7 +102,8 @@ if args.world_size > 1:
 # Set the random seed manually for reproducibility.
 if args.seed is not -1:
     torch.manual_seed(args.seed)
-    torch.cuda.manual_seed(args.seed)
+    if args.cuda:
+        torch.cuda.manual_seed(args.seed)
 
 if args.loss_scale != 1 and args.dynamic_loss_scale:
     raise RuntimeError("Static loss scale and dynamic loss scale cannot be used together.")
@@ -137,8 +139,10 @@ train_data, val_data, test_data = data_config.apply(args)
 ###############################################################################
 
 ntokens = args.data_size
-model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.tied).cuda()
+model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.tied)
 print('* number of parameters: %d' % sum([p.nelement() for p in model.parameters()]))
+if args.cuda:
+    model.cuda()
 
 rnn_model = model
 
@@ -191,8 +195,11 @@ criterion = nn.CrossEntropyLoss()
 # shard reset mask of the same dimensions is also returned.
 
 def get_batch(data):
-    reset_mask_batch = data[1].cuda().long()
-    data = data[0].cuda().long()
+    reset_mask_batch = data[1].long()
+    data = data[0].long()
+    if args.cuda:
+        data = data.cuda()
+        reset_mask_batch = reset_mask_batch.cuda()
     text_batch = Variable(data[:,:-1].t().contiguous(), requires_grad=False)
     target_batch = Variable(data[:,1:].t().contiguous(), requires_grad=False)
     reset_mask_batch = Variable(reset_mask_batch[:,:text_batch.size(0)].t().contiguous(), requires_grad=False)
@@ -274,7 +281,8 @@ def train(total_iters=0):
             if args.rank < 1:
                 with open(os.path.join(os.path.splitext(args.save)[0], 'e%s.pt'%(str(total_iters),)), 'wb') as f:
                     torch.save(model.state_dict(), f)
-            torch.cuda.synchronize()
+            if args.cuda:
+                torch.cuda.synchronize()
         total_iters += 1
 
     return cur_loss
@@ -322,8 +330,8 @@ if not args.no_weight_norm and args.rank <= 0:
     remove_weight_norm(rnn_model)
     with open(args.save, 'wb') as f:
         torch.save(model.state_dict(), f)
-
-torch.cuda.synchronize()
+if args.cuda:
+    torch.cuda.synchronize()
 
 if test_data is not None:
     # Run on test data.

@@ -44,9 +44,13 @@ data_parser.set_defaults(split='1.', data='data/binary_sst/train.csv')
 
 args = parser.parse_args()
 
+args.cuda = torch.cuda.is_available()
+
 train_data, val_data, test_data = data_config.apply(args)
 ntokens = args.data_size
-model = SentimentClassifier(args.model, ntokens, args.emsize, args.nhid, args.nlayers, 0.0, args.all_layers).cuda()
+model = SentimentClassifier(args.model, ntokens, args.emsize, args.nhid, args.nlayers, 0.0, args.all_layers)
+if args.cuda:
+    model.cuda()
 
 if args.fp16:
     model.half()
@@ -75,7 +79,9 @@ def classify(model, text):
         text = Variable(text).long()
         timesteps = Variable(timesteps).long()
         labels = Variable(labels).long()
-        return text.cuda().t(), labels.cuda(), timesteps.cuda()
+        if args.cuda:
+            text, timesteps, labels = text.cuda(), timesteps.cuda(), labels.cuda()
+        return text.t(), labels, timesteps
 
     tstart = start = time.time()
     n = 0

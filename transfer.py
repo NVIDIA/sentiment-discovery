@@ -53,6 +53,8 @@ parser.add_argument('--write_results', default='',
                     help='write results of model on test (or train if none is specified) data to specified filepath [only supported for csv datasets currently]')
 parser.add_argument('--use_cached', action='store_true',
                     help='reuse cached featurizations from a previous from last time')
+parser.add_argument('--drop_neurons', action='store_true',
+                    help='drop top neurons instead of keeping them')
 
 data_config, data_parser = configure_data(parser)
 
@@ -61,13 +63,18 @@ data_parser.set_defaults(valid='data/binary_sst/val.csv', test='data/binary_sst/
 
 args = parser.parse_args()
 
+args.cuda = torch.cuda.is_available()
+
 if args.seed is not -1:
     torch.manual_seed(args.seed)
-    torch.cuda.manual_seed(args.seed)
+    if args.cuda:
+        torch.cuda.manual_seed(args.seed)
 
 train_data, val_data, test_data = data_config.apply(args)
 ntokens = args.data_size
-model = model.RNNFeaturizer(args.model, ntokens, args.emsize, args.nhid, args.nlayers, 0.0, args.all_layers).cuda()
+model = model.RNNFeaturizer(args.model, ntokens, args.emsize, args.nhid, args.nlayers, 0.0, args.all_layers)
+if args.cuda:
+    model.cuda()
 
 if args.fp16:
     model.half()
@@ -107,7 +114,9 @@ def transform(model, text):
         text = Variable(text).long()
         timesteps = Variable(timesteps).long()
         labels = Variable(labels).long()
-        return text.cuda().t(), labels.cuda(), timesteps.cuda()
+        if args.cuda:
+            text, timesteps, labels = text.cuda(), timesteps.cuda(), labels.cuda()
+        return text.t(), labels, timesteps
 
     tstart = start = time.time()
     n = 0
@@ -160,7 +169,7 @@ def score_and_predict(model, X, Y):
     return accuracy, probs
 
 def train_logreg(trX, trY, vaX=None, vaY=None, teX=None, teY=None, penalty='l1', max_iter=100,
-        C=2**np.arange(-8, 1).astype(np.float), seed=42, model=None, eval_test=True, neurons=None):
+        C=2**np.arange(-8, 1).astype(np.float), seed=42, model=None, eval_test=True, neurons=None, drop_neurons=False):
     """
     slightly modified version of openai implementation https://github.com/openai/generating-reviews-discovering-sentiment/blob/master/utils.py
     if model is not None it doesn't train the model before scoring, it just scores the model
@@ -170,6 +179,10 @@ def train_logreg(trX, trY, vaX=None, vaY=None, teX=None, teY=None, penalty='l1',
         C = list([C])
     # extract features for given neuron indices
     if neurons is not None:
+        if drop_neurons:
+            all_neurons = set(list(range(trX.shape[-1])))
+            neurons = set(list(neurons))
+            neurons = list(all_neurons - neurons)
         trX = trX[:, neurons]
         if vaX is not None:
             vaX = vaX[:, neurons]
@@ -368,7 +381,7 @@ print('using neuron(s) %s as features for regression'%(', '.join([str(neuron) fo
 
 # train logistic regression model of features corresponding to sentiment neuron indices against labels
 start = time.time()
-logreg_neuron_model, logreg_neuron_scores, logreg_neuron_probs, neuron_c, neuron_nnotzero = train_logreg(trXt, trY, vaXt, vaY, teXt, teY, max_iter=args.epochs, eval_test=not args.no_test_eval, seed=args.seed, neurons=sentiment_neurons)
+logreg_neuron_model, logreg_neuron_scores, logreg_neuron_probs, neuron_c, neuron_nnotzero = train_logreg(trXt, trY, vaXt, vaY, teXt, teY, max_iter=args.epochs, eval_test=not args.no_test_eval, seed=args.seed, neurons=sentiment_neurons, drop_neurons=args.drop_neurons)
 end = time.time()
 
 print('%d neuron regression took %s seconds'%(args.neurons, str(end-start)))

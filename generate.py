@@ -69,15 +69,20 @@ args = parser.parse_args()
 
 args.data_size = 256
 
+args.cuda = torch.cuda.is_available()
+
 # Set the random seed manually for reproducibility.
 if args.seed >= 0:
     torch.manual_seed(args.seed)
-    torch.cuda.manual_seed(args.seed)
+    if args.cuda:
+        torch.cuda.manual_seed(args.seed)
 
 #if args.temperature < 1e-3:
 #    parser.error("--temperature has to be greater or equal 1e-3")
 
-model = model.RNNModel(args.model, args.data_size, args.emsize, args.nhid, args.nlayers, args.dropout, args.tied).cuda()
+model = model.RNNModel(args.model, args.data_size, args.emsize, args.nhid, args.nlayers, args.dropout, args.tied)
+if args.cuda:
+    model.cuda()
 
 if args.fp16:
     model.half()
@@ -206,7 +211,9 @@ mask = args.overwrite is not None
 model.eval()
 
 hidden = model.rnn.init_hidden(1)
-input = Variable(torch.LongTensor([int(ord('\n'))])).cuda()
+input = Variable(torch.LongTensor([int(ord('\n'))]))
+if args.cuda:
+    input = input.cuda()
 input = input.view(1,1).contiguous()
 model_step(model, input, neuron, mask, args.overwrite, polarity)
 input.data.fill_(int(ord(' ')))
