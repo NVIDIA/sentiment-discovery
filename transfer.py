@@ -35,7 +35,7 @@ parser.add_argument('--nlayers', type=int, default=1,
                     help='number of layers')
 parser.add_argument('--all_layers', action='store_true',
                     help='if more than one layer is used, extract features from all layers, not just the last layer')
-parser.add_argument('--epochs', type=int, default=40,
+parser.add_argument('--epochs', type=int, default=100,
                     help='number of epochs to run Logistic Regression')
 parser.add_argument('--seed', type=int, default=42,
                     help='random seed')
@@ -81,7 +81,7 @@ if args.fp16:
 
 # load char embedding and recurrent encoder for featurization
 with open(args.load_model, 'rb') as f:
-    sd = torch.load(f)
+    sd = x = torch.load(f)
     if 'encoder' in sd:
         sd = sd['encoder']
 
@@ -116,7 +116,7 @@ def transform(model, text):
         labels = Variable(labels).long()
         if args.cuda:
             text, timesteps, labels = text.cuda(), timesteps.cuda(), labels.cuda()
-        return text.t(), labels, timesteps
+        return text.t(), labels, timesteps-1
 
     tstart = start = time.time()
     n = 0
@@ -138,7 +138,7 @@ def transform(model, text):
             labels.append(labels_batch.data.cpu().numpy())
             features.append(cell.data.cpu().numpy())
 
-            num_char = length_batch.sum().data[0]
+            num_char = length_batch.sum().data.item()
 
             end = time.time()
             elapsed_time = end - start
@@ -147,7 +147,10 @@ def transform(model, text):
 
             s_per_batch = total_time / (i+1)
             timeleft = (len_ds - (i+1)) * s_per_batch
-            ch_per_s = num_char / elapsed_time
+            if elapsed_time == 0:
+                ch_per_s = num_char
+            else:
+                ch_per_s = num_char / elapsed_time
             print('batch {:5d}/{:5d} | ch/s {:.2E} | time {:.2E} | time left {:.2E}'.format(i, len_ds, ch_per_s, elapsed_time, timeleft))
 
     if not first_feature:
@@ -193,7 +196,7 @@ def train_logreg(trX, trY, vaX=None, vaY=None, teX=None, teY=None, penalty='l1',
     scores = []
     if model is None:
         for i, c in enumerate(C):
-            model = LogisticRegression(C=c, penalty=penalty, max_iter=max_iter, random_state=42+i)
+            model = LogisticRegression(C=c, penalty=penalty, max_iter=max_iter, random_state=seed+i)
             model.fit(trX, trY)
             if vaX is not None:
                 score = model.score(vaX, vaY)
@@ -202,7 +205,7 @@ def train_logreg(trX, trY, vaX=None, vaY=None, teX=None, teY=None, penalty='l1',
             scores.append(score)
             del model
         c = C[np.argmax(scores)]
-        model = LogisticRegression(C=c, penalty=penalty, max_iter=max_iter, random_state=42+len(C))
+        model = LogisticRegression(C=c, penalty=penalty, max_iter=max_iter, random_state=seed+len(C))
         model.fit(trX, trY)
     else:
         c = model.C
