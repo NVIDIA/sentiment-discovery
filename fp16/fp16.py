@@ -48,12 +48,6 @@ class FP16_Module(nn.Module):
     def forward(self, *inputs, **kwargs):
         return fp16_to_fp32(self.module(*(fp32_to_fp16(inputs)), **kwargs))
 
-    def load_state_dict(self, state_dict, strict=True):
-        self.module.load_state_dict(state_dict, strict=strict)
-
-    def state_dict(self, destination=None, prefix='', keep_vars=False):
-        return self.module.state_dict(destination=destination, prefix=prefix, keep_vars=keep_vars)
-
 class FP16_Optimizer(object):
     """
     FP16_Optimizer is designed to wrap an existing PyTorch optimizer, 
@@ -72,18 +66,55 @@ class FP16_Optimizer(object):
 
         self.fp16_param_groups = []
         self.fp32_param_groups = []
-        for param_group in optimizer.param_groups:
-            fp16_params_this_group = [param for param in param_group['params'] if param.requires_grad]
-        
-            fp32_params_this_group = _flatten_dense_tensors(
-                [param.detach().data.clone().float() for param in fp16_params_this_group])
-            fp32_params_this_group = Variable(fp32_params_this_group, requires_grad = True)
-            fp32_params_this_group.grad = fp32_params_this_group.new(*fp32_params_this_group.size())
-        
-            param_group['params'] = [fp32_params_this_group]
+        self.fp32_flattened_groups = []
+        self.fp32_grad_groups = []
+        for i, param_group in enumerate(optimizer.param_groups):
+            #print("FP16_Optimizer processing param group {}:".format(i))
+            fp16_params_this_group = []
+            fp32_params_this_group = []
+            fp32_flattened_grads_this_group = []
+            for param in param_group['params']:
+                if param.requires_grad:
+                    if param.type() == 'torch.cuda.HalfTensor':
+             #           print("FP16_Optimizer received torch.cuda.HalfTensor with {}"
+             #                 .format(param.size()))
+                        fp16_params_this_group.append(param)
+                    elif param.type() == 'torch.cuda.FloatTensor':
+              #          print("FP16_Optimizer received torch.cuda.FloatTensor with {}"
+              #                .format(param.size()))
+                        fp32_params_this_group.append(param)
+                    else:
+                        raise TypeError("Wrapped parameters must be either "
+                                        "torch.cuda.FloatTensor or torch.cuda.HalfTensor. "  
+                                        "Received {}".format(param.type()))
+      
+            fp32_flattened_this_group = None
+            if len(fp16_params_this_group) > 0:
+                fp32_flattened_this_group = _flatten_dense_tensors(
+                    [param.detach().data.clone().float() for param in fp16_params_this_group])
+
+                fp32_flattened_this_group = Variable(fp32_flattened_this_group, requires_grad = True)
+
+                fp32_flattened_this_group.grad = fp32_flattened_this_group.new(
+                    *fp32_flattened_this_group.size())
+
+                fp32_flattened_grads_this_group = list(_unflatten_dense_tensors(
+                    fp32_flattened_this_group.grad.data, fp16_params_this_group))
+
+       
+            # python's lovely list concatenation via +
+            if fp32_flattened_this_group is not None:
+                param_group['params'] = [fp32_flattened_this_group] + fp32_params_this_group
+            else:
+                param_group['params'] = fp32_params_this_group
 
             self.fp16_param_groups.append(fp16_params_this_group)
             self.fp32_param_groups.append(fp32_params_this_group)
+            self.fp32_flattened_groups.append(fp32_flattened_this_group)
+            self.fp32_grad_groups.append(fp32_flattened_grads_this_group)
+
+        # print("self.fp32_flattened_groups = ", self.fp32_flattened_groups)
+        # print("self.fp16_param_groups = ", self.fp16_param_groups)
 
         self.optimizer = optimizer.__class__(optimizer.param_groups)
 
@@ -114,34 +145,65 @@ class FP16_Optimizer(object):
                     param.grad.zero_()
 
     def _check_overflow(self):
-        fp16_params = [] 
-        for fp16_group in self.fp16_param_groups:
-            for param in fp16_group:
-                fp16_params.append(param)
-        self.overflow = self.loss_scaler.has_overflow(fp16_params)
+        params = [] 
+        for group in self.fp16_param_groups:
+            for param in group:
+                params.append(param)
+        for group in self.fp32_param_groups:
+            for param in group:
+                params.append(param)
+        self.overflow = self.loss_scaler.has_overflow(params)
 
     def _update_scale(self, has_overflow=False):
         self.loss_scaler.update_scale(has_overflow)
 
+    # TODO:  Register a hook on each variable to do the overflow check, gradient copy + downscale,
+    # FP32 allreduce for distributed in a different stream.  Debatable which ops should be 
+    # treated that way, but it'll be fun to play with.
     def _copy_grads_fp16_to_fp32(self):
-        for fp32_group, fp16_group in zip(self.fp32_param_groups, self.fp16_param_groups):
-            # This might incur one more deep copy than is necessary.
-            fp32_group.grad.data.copy_(
-                _flatten_dense_tensors([fp16_param.grad.data for fp16_param in fp16_group]))
+        for fp32_grad_group, fp16_group in zip(self.fp32_grad_groups, self.fp16_param_groups):
+            for fp32_grad, fp16_param in zip(fp32_grad_group, fp16_group):
+                if(fp16_param.grad is not None):
+                    fp32_grad.copy_(fp16_param.grad.data)
 
     def _downscale_fp32(self):
-        for param_group in self.optimizer.param_groups:
-            param_group['params'][0].grad.data.mul_(1./self.loss_scale)
+        if self.loss_scale != 1.0: 
+            # print("downscaling fp32 gradients")
+            for param_group in self.optimizer.param_groups:
+                for param in param_group['params']:
+                    param.grad.data.mul_(1./self.loss_scale)
 
-    def clip_fp32_grads(self, clip=-1):
-        if clip > 0:
-            torch.nn.utils.clip_grad_norm(self.fp32_param_groups, clip)
+    def clip_fp32_grads(self, max_norm, norm_type=2):
+        """
+        Clips fp32 master gradients via torch.nn.utils.clip_grad_norm.
+
+        Args:
+            max_norm (float or int): max norm of the gradients
+            norm_type (float or int): type of the used p-norm. Can be ``'inf'`` for
+                infinity norm.
+
+        Returns:
+            Total norm of the current fp32 gradients (viewed as a single vector).
+
+        .. warning::
+            Returns -1 if the most recently computed fp16 gradients overflowed (that is, if self.overflow is True).
+        """
+        if not self.overflow:
+            fp32_params = []
+            for param_group in self.optimizer.param_groups:
+                for param in param_group['params']:
+                    fp32_params.append(param)
+            return torch.nn.utils.clip_grad_norm(fp32_params, max_norm, norm_type)
+        else:
+            return -1
 
     def _copy_params_fp32_to_fp16(self):
-        for fp16_group, fp32_group in zip(self.fp16_param_groups, self.fp32_param_groups):
-            for fp16_param, fp32_param in zip(fp16_group, 
-                _unflatten_dense_tensors(fp32_group, fp16_group)):
-                fp16_param.data.copy_(fp32_param.data)
+        for fp16_group, fp32_group in zip(self.fp16_param_groups, self.fp32_flattened_groups):
+            if len(fp16_group) > 0:
+                # print("Copying fp16 group with len {}".format(len(fp16_group)))
+                for fp16_param, fp32_data in zip(fp16_group, 
+                    _unflatten_dense_tensors(fp32_group.data, fp16_group)):
+                    fp16_param.data.copy_(fp32_data)
 
     def state_dict(self):
         """
@@ -297,9 +359,11 @@ class FP16_Optimizer(object):
             fp16_optimizer_obj.backward should not be regarded as valid in general, 
             because it's possible 
             they have been scaled (and in the case of dynamic loss scaling, 
-            the scale factor may silently change over time).  
+            the scale factor may change over time).  
             If the user wants to inspect gradients after a call to fp16_optimizer_obj.backward,  
-            he/she should query the .grad attribute of FP16_Optimizer's stored fp32 parameters.
+            only the master gradients should be regarded as valid, and can be retrieved via
+            :attr:`inspect_fp32_grad_data()`.
+
 
         Args:
             loss:  The loss output by the user's model.  loss may be either float or half (but see first Note above).
@@ -339,6 +403,31 @@ class FP16_Optimizer(object):
             if self.overflow: return
         self._copy_grads_fp16_to_fp32()
         self._downscale_fp32()
+
+    def inspect_fp32_grad_data(self):
+        """
+        When running with FP16_Optimizer, .grad attributes of a model's fp16 leaves should not be
+        regarded as truthful, because they might be scaled.  
+        After a call to :attr:`fp16_optimizer_obj.backward(loss)`, if no overflow was encountered,
+        the fp32 master params' .grad
+        attributes will contain valid gradients properly divided by the loss scale.  However, 
+        because :attr:`FP16_Optimizer` flattens some parameters, accessing them may be 
+        nonintuitive.  :attr:`inspect_fp32_grad_data`
+        allows those gradients to be viewed with shapes corresponding to their associated model leaves.
+
+        Returns:
+            List of lists (one list for each parameter group).  The list for each parameter group
+            is a list of the .grad.data attributes of the fp32 master params belonging to that group.                 
+        """
+        raise NotImplementedError("Currently not implemented, working on it...")
+        fp32_grads_each_group = []
+        if self.overflow:
+            print("Warning:  calling FP16_Optimizer.inspect_fp32_grad_data while in an overflow state.  "
+                  "Gradients are currently invalid (may be inf, nan, or stale).  Returning None.")
+            return None
+        else:
+            return None
+            
 
     @property
     def loss_scale(self):

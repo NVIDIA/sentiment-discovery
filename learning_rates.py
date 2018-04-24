@@ -47,3 +47,23 @@ class LinearLR(_LRScheduler):
         for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
             param_group['lr'] = lr
         return self.done
+
+class WarmupLR:
+    def __init__(self, optimizer, max_iters, last_iter=-1):
+        self.optimizer = optimizer
+        self.max_iters = max_iters
+        self.num_iters = last_iter
+        self.step(last_iter + 1)
+    
+    def scale_lr(self, lr):
+        return (lr * (self.num_iters+1) / self.max_iters)
+
+    def step(self, epoch=None):
+        if epoch is None:
+            epoch = self.num_iters + 1
+        self.num_iters = epoch
+        if self.num_iters >= self.max_iters:
+            return
+        for param_group in self.optimizer.param_groups:
+            lr = param_group['lr']
+            param_group['lr'] = self.scale_lr(lr)

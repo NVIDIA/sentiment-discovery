@@ -67,26 +67,41 @@ class RNNFeaturizer(nn.Module):
         self.all_layers = all_layers
         self.output_size = self.nhid if not self.all_layers else self.nhid * self.nlayers
 
-    def forward(self, input, seq_len=None):
+    def forward(self, input, seq_len=None, get_hidden=False):
         self.rnn.detach_hidden()
         if seq_len is None:
             for i in range(input.size(0)):
                 emb = self.drop(self.encoder(input[i]))
                 _, hidden = self.rnn(emb.unsqueeze(0), collectHidden=True)
-            cell = self.get_cell_features(hidden)
+            cell = self.get_features(hidden)
+            if get_hidden:
+                cell = (self.get_features(hidden, get_hidden=True), cell)
         else:
             last_cell = 0
+            last_hidden = 0
             for i in range(input.size(0)):
                 emb = self.drop(self.encoder(input[i]))
                 _, hidden = self.rnn(emb.unsqueeze(0), collectHidden=True)
-                cell = self.get_cell_features(hidden)
+                cell = self.get_features(hidden)
+                if get_hidden:
+                    hidden = self.get_features(hidden, get_hidden=True)
                 if i > 0:
                     cell = get_valid_outs(i, seq_len, cell, last_cell)
-                last_cell = cell   
+                    if get_hidden:
+                        hidden = get_valid_outs(i, seq_len, hidden, last_hidden)
+                last_cell = cell
+                if get_hidden:
+                    last_hidden = hidden
+            if get_hidden:
+                cell = (hidden, cell)
+
         return cell
 
-    def get_cell_features(self, hidden):
-        cell = hidden[1]
+    def get_cell_features(self, hidden, get_hidden=False):
+        if not get_hidden:
+            cell = hidden[1]
+        else:
+            cell = hidden[0]
         #get cell state from layers
         if self.all_layers:
             cell = torch.cat(cell, -1)

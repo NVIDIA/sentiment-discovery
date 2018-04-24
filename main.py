@@ -15,7 +15,7 @@ from model import DistributedDataParallel as DDP
 
 from apex.reparameterization import apply_weight_norm, remove_weight_norm
 from configure_data import configure_data
-from learning_rates import LinearLR
+from learning_rates import LinearLR, WarmupLR
 
 parser = argparse.ArgumentParser(description='PyTorch Sentiment-Discovery Language Modeling')
 parser.add_argument('--model', type=str, default='mLSTM',
@@ -62,6 +62,8 @@ parser.add_argument('--rank', type=int, default=-1,
                     help='distributed worker rank. Typically set automatically from multiproc.py')
 parser.add_argument('--optim', default='SGD',
                     help='One of SGD or Adam')
+parser.add_argument('--warmup', type=float, default=0,
+                    help='percentage of data to warmup on (.03 = 3% of all training iters). Default 0')
 
 # Add dataset args to argparser and set some defaults
 data_config, data_parser = configure_data(parser)
@@ -172,6 +174,9 @@ else:
 if train_data is not None:
     num_iters = len(train_data) * args.epochs
     LR = LinearLR(optim, num_iters)
+    if args.warmup != 0:
+        warmup_iter = args.warmup * num_iters
+        LR_Warmer = WarmupLR(optim, warmup_iter)
 
 # wrap model for distributed training
 if args.world_size > 1:
@@ -257,10 +262,14 @@ def train(total_iters=0):
         lr = LR.get_lr()[0]
         if not args.fp16:
             LR.step()
+            if args.warmup != 0:
+                LR_Warmer.step()
         else:
             # if fp16 optimizer skips gradient step due to explosion do not step lr
             if not optim.overflow:
                 LR.step()
+                if args.warmup != 0:
+                    LR_Warmer.step()
 
         if i % args.log_interval == 0:
             cur_loss = total_loss[0] / args.log_interval

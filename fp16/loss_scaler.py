@@ -51,11 +51,22 @@ class DynamicLossScaler:
 
     # `x` is a torch.Tensor
     def _has_inf_or_nan(x):
-        inf_count = torch.sum(x.abs() == float('inf'))
-        if inf_count > 0:
+        try:
+            # Stopgap until upstream fixes sum() on HalfTensors
+            cpu_sum = float(x.float().sum())
+            # cpu_sum = float(x.sum())
+            # print(cpu_sum)
+        except RuntimeError as instance:
+            # We want to check if inst is actually an overflow exception.
+            # RuntimeError could come from a different error.
+            # If so, we still want the exception to propagate.
+            if "value cannot be converted" not in instance.args[0]:
+                raise
             return True
-        nan_count = torch.sum(x != x)
-        return nan_count > 0
+        else:
+            if cpu_sum == float('inf') or cpu_sum == -float('inf') or cpu_sum != cpu_sum:
+                return True
+            return False
 
     # `overflow` is boolean indicating whether we overflowed in gradient
     def update_scale(self, overflow):
