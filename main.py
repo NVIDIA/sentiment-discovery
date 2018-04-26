@@ -259,7 +259,7 @@ def train(total_iters=0):
         optim.step()
 
         # step learning rate and log training progress
-        lr = LR.get_lr()[0]
+        lr = optim.param_groups[0]['lr']
         if not args.fp16:
             LR.step()
             if args.warmup != 0:
