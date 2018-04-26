@@ -64,6 +64,8 @@ parser.add_argument('--optim', default='Adam',
                     help='One of PyTorch\'s optimizers (Adam, SGD, etc). Default: Adam')
 parser.add_argument('--warmup', type=float, default=0,
                     help='percentage of data to warmup on (.03 = 3% of all training iters). Default 0')
+parser.add_argument('--bidirectional', action='store_true',
+                    help='use bidirectional encoder')
 
 # Add dataset args to argparser and set some defaults
 data_config, data_parser = configure_data(parser)
@@ -141,7 +143,7 @@ train_data, val_data, test_data = data_config.apply(args)
 ###############################################################################
 
 ntokens = args.data_size
-model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.tied)
+model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.tied, args.bidirectional)
 print('* number of parameters: %d' % sum([p.nelement() for p in model.parameters()]))
 if args.cuda:
     model.cuda()
@@ -158,7 +160,7 @@ if args.load != '':
         remove_weight_norm(model.rnn)
 
 if not args.no_weight_norm:
-    apply_weight_norm(model.rnn, hook_child=False)
+    apply_weight_norm(model.rnn, hook_child=True)
 
 # create optimizer and fp16 models
 if args.fp16:

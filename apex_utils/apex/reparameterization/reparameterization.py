@@ -72,7 +72,7 @@ class Reparameterization(object):
             fn = reparameterization(name, dim, module)
 
         weight = getattr(module2use, name2use)
-        if weight.dim() <= 1:
+        if weight is None or weight.dim() <= 1:
             return
 
         # remove weight from parameter list

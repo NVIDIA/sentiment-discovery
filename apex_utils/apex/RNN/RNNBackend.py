@@ -44,18 +44,20 @@ class bidirectionalRNN(nn.Module):
         self.rnns = nn.ModuleList([self.fwd, self.bckwrd])
         
     #collect hidden option will return all hidden/cell states from entire RNN
-    def forward(self, input, collect_hidden=False):
+    def forward(self, input, collect_hidden=False, reset_mask=None):
         """
         forward() stub
         """
         seq_len = input.size(0)
         bsz = input.size(1)
         
-        fwd_out, fwd_hiddens = list(self.fwd(input, collect_hidden = collect_hidden))
-        bckwrd_out, bckwrd_hiddens = list(self.bckwrd(input, reverse=True, collect_hidden = collect_hidden))
+        fwd_out, fwd_hiddens = list(self.fwd(input, collect_hidden = collect_hidden, reset_mask=reset_mask))
+        bckwrd_out, bckwrd_hiddens = list(self.bckwrd(input, reverse=True, collect_hidden = collect_hidden, reset_mask=reset_mask))
 
         output = torch.cat( [fwd_out, bckwrd_out], -1 )
-        hiddens = tuple( torch.cat(hidden, -1) for hidden in zip( fwd_hiddens, bckwrd_hiddens) )
+#        print(fwd_hiddens)
+        hiddens = (fwd_hiddens, bckwrd_hiddens)
+#        hiddens = tuple( torch.cat(hidden, -1) for hidden in zip( fwd_hiddens, bckwrd_hiddens) )
 
         return output, hiddens
 
@@ -78,7 +80,7 @@ class bidirectionalRNN(nn.Module):
         detach_hidden() stub
         """
         for rnn in self.rnns:
-            rnn.detachHidden()
+            rnn.detach_hidden()
         
     def reset_hidden(self, bsz, reset_mask=None):
         """

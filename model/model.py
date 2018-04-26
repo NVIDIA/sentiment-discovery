@@ -7,12 +7,12 @@ from apex import RNN
 class RNNModel(nn.Module):
     """Container module with an encoder, a recurrent module, and a decoder."""
 
-    def __init__(self, rnn_type, ntoken, ninp, nhid, nlayers, dropout=0.5, tie_weights=False):
+    def __init__(self, rnn_type, ntoken, ninp, nhid, nlayers, dropout=0.5, tie_weights=False, bidirectional=False):
         super(RNNModel, self).__init__()
         self.drop = nn.Dropout(dropout)
         self.encoder = nn.Embedding(ntoken, ninp)
-        self.decoder = nn.Linear(nhid, ntoken)
-        self.rnn=getattr(RNN, rnn_type)(ninp, nhid, nlayers, dropout=dropout)
+        self.decoder = nn.Linear(nhid*2 if bidirectional else nhid, ntoken)
+        self.rnn=getattr(RNN, rnn_type)(ninp, nhid, nlayers, dropout=dropout, bidirectional=bidirectional)
 
         # Optionally tie weights as in:
         # "Using the Output Embedding to Improve Language Models" (Press & Wolf 2016)
