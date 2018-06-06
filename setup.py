@@ -81,7 +81,7 @@ for file in cuda_headers+headers:
 assert libaten, "Could not find PyTorch's libATen."
 assert aten_h, "Could not find PyTorch's ATen header."
 
-library_dirs.append(os.path.dirname(libaten))
+library_dirs.append(os.path.dirname(libaten[0]))
 
 #create some places to collect important things
 object_files = []
