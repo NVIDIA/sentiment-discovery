@@ -68,7 +68,7 @@ cuda_files = find(curdir, lambda file: file.endswith(".cu"), True)
 cuda_headers = find(curdir, lambda file: file.endswith(".cuh"), True)
 headers = find(curdir, lambda file: file.endswith(".h"), True)
 
-libaten = find(torch_dir, re.compile("libaten", re.IGNORECASE).search, False)
+libaten = list(set(find(torch_dir, re.compile("libaten.*(so)\Z", re.IGNORECASE).match, True)))
 aten_h = find(torch_dir, re.compile("aten.h", re.IGNORECASE).search, False)
 
 include_dirs = [os.path.dirname(os.path.dirname(aten_h))]
