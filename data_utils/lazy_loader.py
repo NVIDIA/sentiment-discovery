@@ -3,6 +3,7 @@ import mmap
 import pickle as pkl
 import time
 from itertools import accumulate
+from threading import Lock
 
 import torch
 
@@ -29,9 +30,13 @@ def make_lazy(path, strs, data_type='data'):
     datapath = os.path.join(lazypath, data_type)
     lenpath = os.path.join(lazypath, data_type+'.len.pkl')
     if not torch.distributed._initialized or torch.distributed.get_rank() == 0:
-        with open(datapath, 'w') as f:
-            f.write(''.join(strs))
-        str_ends = list(accumulate(map(len, strs)))
+        with open(datapath, 'wb') as f:
+            str_ends = []
+            str_cnt = 0
+            for s in strs:
+                f.write(s.encode('utf-8'))
+                str_cnt += len(s)
+                str_ends.append(str_cnt)
         pkl.dump(str_ends, open(lenpath, 'wb'))
     else:
         while not os.path.exists(lenpath):
@@ -53,7 +58,7 @@ class lazy_array_loader(object):
         lazypath = get_lazy_path(path)
         datapath = os.path.join(lazypath, data_type)
         #get file where array entries are concatenated into one big string
-        self._file = open(datapath, 'r')
+        self._file = open(datapath, 'rb')
         self.file = self._file
         #memory map file if necessary
         self.mem_map = mem_map
@@ -61,6 +66,7 @@ class lazy_array_loader(object):
             self.file = mmap.mmap(self.file.fileno(), 0, prot=mmap.PROT_READ)
         lenpath = os.path.join(lazypath, data_type+'.len.pkl')
         self.ends = pkl.load(open(lenpath, 'rb'))
+        self.read_lock = Lock()
 
     def __getitem__(self, index):
         """read file and splice strings based on string ending array `ends` """
@@ -88,6 +94,7 @@ class lazy_array_loader(object):
         """read specified portion of file"""
         #TODO: Solve race condition
         #Seek to start of file read
+        self.read_lock.acquire()
         self.file.seek(start)
         ##### Getting context-switched here
         #read to end of file if no end point provided
@@ -96,8 +103,11 @@ class lazy_array_loader(object):
         #else read amount needed to reach end point
         else:
             rtn = self.file.read(end-start)
+        self.read_lock.release()
         #TODO: @raulp figure out mem map byte string bug
         #if mem map'd need to decode byte string to string
+        #rtn = rtn.decode('utf-8')
+        rtn = str(rtn)
         if self.mem_map:
             rtn = rtn.decode('unicode_escape')
         return rtn
