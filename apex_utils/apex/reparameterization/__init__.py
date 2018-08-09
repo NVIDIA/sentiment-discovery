@@ -1,3 +1,4 @@
+import torch
 from .weight_norm import WeightNorm
 from .reparameterization import Reparameterization
 
@@ -61,6 +62,24 @@ def remove_weight_norm(module, name='', remove_all=False):
     return remove_reparameterization(module, reparameterization=WeightNorm,
                                     name=name, remove_all=remove_all)
 
+def get_module_and_name(module, name):
+        """
+        recursively fetches (possible) child module and name of weight to be reparameterized
+        """
+        module2use = module
+        if name == '':
+            return module, name
+        names = name.split('.')
+        for i, n in enumerate(names):
+            param_or_module = getattr(module2use, n)
+            if i == len(names)-1:
+                if isinstance(param_or_module, torch.nn.Parameter):
+                    return module2use, n
+                else:
+                    return param_or_module, ''
+            else:
+                module2use = param_or_module
+
 def apply_reparameterization(module, reparameterization=None, name='', dim=0, hook_child=True):
     """
     Applies a given weight reparameterization (such as weight normalization) to
@@ -85,10 +104,15 @@ def apply_reparameterization(module, reparameterization=None, name='', dim=0, ho
 
     """
     assert reparameterization is not None
-    if name != '':
+    module2use, name2use = get_module_and_name(module, name)
+    if name2use != '':
         Reparameterization.apply(module, name, dim, reparameterization, hook_child)
     else:
-        names = list(module.state_dict().keys())
+        names = [n for n,_ in module2use.named_parameters()]
+        if name2use != '':
+            names = [name2use+'.'+n for n in names]
+        if name != '':
+            names = [name+'.'+n for n in names]
         for name in names:
             apply_reparameterization(module, reparameterization, name, dim, hook_child)
     return module

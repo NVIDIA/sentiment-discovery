@@ -141,7 +141,10 @@ class Reparameterization(object):
         module2use, name2use = Reparameterization.get_module_and_name(module, self.name)
         _w = getattr(module2use, name2use)
         if not self.evaluated or _w is None:
-            setattr(module2use, name2use, self.compute_weight(module2use, name2use))
+            if _w is not None:
+                delattr(module2use, name2use)
+            w = self.compute_weight(module2use, name2use)
+            setattr(module2use, name2use, w)
             self.evaluated = True
 
     def backward_hook(self, module, grad_input, grad_output):

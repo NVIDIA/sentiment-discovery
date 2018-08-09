@@ -18,14 +18,18 @@ def reverse_dir_tensor(tensor, dim=0):
     chunked = chunked[::-1]
     return torch.cat( chunked, dim=dim).view(*tensor.size())
 
+def is_iterable(maybe_iterable):
+    return isinstance(maybe_iterable, (list, tuple))
+
 def flatten_list(tens_list):
     """
     flatten_list stub
     """
-    if not ( isinstance(tens_list, tuple) or isinstance(tens_list, list) ):
+    if not (is_iterable(tens_list)):
         return tens_list
     
     return torch.cat(tens_list, dim=0).view(len(tens_list), *tens_list[0].size() )
+
 
 #These modules always assumes batch_first
 class bidirectionalRNN(nn.Module):
@@ -40,15 +44,15 @@ class bidirectionalRNN(nn.Module):
         self.rnns = nn.ModuleList([self.fwd, self.bckwrd])
         
     #collect hidden option will return all hidden/cell states from entire RNN
-    def forward(self, input, collectHidden=False):
+    def forward(self, input, collect_hidden=False):
         """
         forward() stub
         """
         seq_len = input.size(0)
         bsz = input.size(1)
         
-        fwd_out, fwd_hiddens = list(self.fwd(input, collectHidden = collectHidden))
-        bckwrd_out, bckwrd_hiddens = list(self.bckwrd(input, reverse=True, collectHidden = collectHidden))
+        fwd_out, fwd_hiddens = list(self.fwd(input, collect_hidden = collect_hidden))
+        bckwrd_out, bckwrd_hiddens = list(self.bckwrd(input, reverse=True, collect_hidden = collect_hidden))
 
         output = torch.cat( [fwd_out, bckwrd_out], -1 )
         hiddens = tuple( torch.cat(hidden, -1) for hidden in zip( fwd_hiddens, bckwrd_hiddens) )
@@ -76,12 +80,12 @@ class bidirectionalRNN(nn.Module):
         for rnn in self.rnns:
             rnn.detachHidden()
         
-    def reset_hidden(self, bsz):
+    def reset_hidden(self, bsz, reset_mask=None):
         """
         reset_hidden() stub
         """
         for rnn in self.rnns:
-            rnn.reset_hidden(bsz)
+            rnn.reset_hidden(bsz, reset_mask=reset_mask)
 
     def init_inference(self, bsz):    
         """
@@ -114,122 +118,94 @@ class stackedRNN(nn.Module):
         
         self.nLayers = len(self.rnns)
         
-        #for i, rnn in enumerate(self.rnns):
-        #    self.add_module("rnn_layer"+str(i), self.rnns[i])
         self.rnns = nn.ModuleList(self.rnns)
 
 
     '''
     Returns output as hidden_state[0] Tensor([sequence steps][batch size][features])
     If collect hidden will also return Tuple(
-        [n_hidden_states][layer] Tensor([sequence steps][batch size][features])
+        [n_hidden_states][sequence steps] Tensor([layer][batch size][features])
     )
     If not collect hidden will also return Tuple(
-        [n_hidden_states][layer] Tensor([batch size][features])
+        [n_hidden_states] Tensor([layer][batch size][features])
     '''
-    def forward(self, input, collectHidden=False, reverse=False, reset_mask=None):
+    def forward(self, input, collect_hidden=False, reverse=False, reset_mask=None):
         """
         forward() stub
         """
         
         seq_len = input.size(0)
         bsz = input.size(1)
+        inp_iter = reversed(range(seq_len)) if reverse else range(seq_len)
 
-        hidden_states = [ ]
+        hidden_states = [[] for i in range(self.nLayers)]
+        outputs = []
 
-        #Treat first layer independently, needs to be reversed if reverse. Rest
-        #is the same with reverse or not.
+        for seq in inp_iter:
+            if not reverse and reset_mask is not None:
+                self.reset_hidden(bsz, reset_mask=reset_mask[seq])
+            for layer in range(self.nLayers):
+                if layer == 0:
+                    prev_out = input[seq]
+                    
+                outs = self.rnns[layer](prev_out)
 
-        layer_output = []
-        
-        if not reverse:
-            for i in range(seq_len):
-                if reset_mask is not None:
-                    self.rnns[0].reset_hidden(bsz, reset_mask=reset_mask[i])
-                layer_output.append(self.rnns[0](input[i]))
-        else:
-            for i in reversed(range(seq_len)):
-                layer_output.append(self.rnns[0](input[i]))
-                if reset_mask is not None:
-                    self.rnns[0].reset_hidden(bsz, reset_mask=reset_mask[i])
+                if collect_hidden:
+                    hidden_states[layer].append(outs)
+                elif seq == seq_len-1:
+                    hidden_states[layer].append(outs)
+                    
+                prev_out = outs[0]
+            if reverse and reset_mask is not None:
+                self.reset_hidden(bsz, reset_mask=reset_mask[seq])
 
-        '''
-        transpose output list
-        list( [seq_length][hidden_states] x Tensor([bsz][features]) )
-        to
-        list( [hidden_states][seq_length] x Tensor([bsz][features]) )
+            outputs.append(prev_out)
 
-        I always endup going through this trick everytime I use it so...
-
-        >>> list_of_list = [ [ i+j*4 for i in range(4) ] for j in range (3) ]
-            [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10, 11]]
-
-        >>> list_of_lists = list( list( entry ) for entry in zip(*list_of_lists) )
-            [[0, 4, 8], [1, 5, 9], [2, 6, 10], [3, 7, 11]]
-
-        >>> list_of_lists = list( list( entry ) for entry in zip(*list_of_lists) )
-            [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10, 11]]
-
-        '''
-        layer_output = list( list(entry) for entry in zip(*layer_output) )
-        hidden_states.append( layer_output )
-                
-        for layer in range(1, self.nLayers):
-            
-            layer_output = []
-            #Grab last layers hidden states, assume first hidden state was output/input to next layer
-            cur_input = hidden_states[-1][0]
-            for inp in cur_input:
-                if self.dropout > 0.0 and self.dropout < 1.0:
-                    inp = F.dropout(inp, self.dropout, self.training, False)
-                if not reverse:
-                    if reset_mask is not None:
-                        self.rnns[layer].reset_hidden(bsz, reset_mask=reset_mask[i])
-                layer_output.append( self.rnns[layer](inp) )
-                if reverse:
-                    if reset_mask is not None:
-                        self.rnns[layer].reset_hidden(bsz, reset_mask=reset_mask[i])
-
-            #transpose output like above
-            hidden_states.append( [list(tensors) for tensors in zip(*layer_output) ] )
-
-        #reverse seq order if reverse=True
         if reverse:
-            #for layer in range(len(hidden_states)):
-            #    for hidden_state in range(len(hidden_states[layer])):
-            #        hidden_states[layer][hidden_state] = list(reversed(hidden_states[layer][hidden_state]))
-            hidden_states = [ [ [ step for step in reversed(hidden) ]
-                                           for hidden in layer ]
-                                               for layer in hidden_states ]
+            outputs = list(reversed(outputs))
+        '''
+        At this point outputs is in format:
+        list( [seq_length] x Tensor([bsz][features]) )
+        need to convert it to:
+        list( Tensor([seq_length][bsz][features]) )
+        '''
+        output = flatten_list(outputs)
 
-        output = hidden_states[-1][0]
-        output = torch.cat(output, dim=0).view(seq_len, bsz, -1)
+        '''
+        hidden_states at this point is in format:
+        list( [layer][seq_length][hidden_states] x Tensor([bsz][features]) )
+        need to convert it to:
+          For not collect hidden:
+            list( [hidden_states] x Tensor([layer][bsz][features]) )
+          For collect hidden:
+            list( [hidden_states][seq_length] x Tensor([layer][bsz][features]) )
+        '''
+        if not collect_hidden:
+            seq_len = 1
+        n_hid = self.rnns[0].n_hidden_states
+        new_hidden = [ [ [ None for k in range(self.nLayers)] for j in range(seq_len) ] for i in range(n_hid) ]
+
+        for i in range(n_hid):
+            for j in range(seq_len):
+                for k in range(self.nLayers):
+                    new_hidden[i][j][k] = hidden_states[k][j][i]
+
+        hidden_states = new_hidden
+        #Now in format list( [hidden_states][seq_length][layer] x Tensor([bsz][features]) )
+        #Reverse seq_length if reverse
+        if reverse:
+            hidden_states = list( list(reversed(list(entry))) for entry in hidden_states)
+
+        #flatten layer dimension into tensor
+        hiddens = list( list(
+            flatten_list(seq) for seq in hidden )
+                        for hidden in hidden_states )
         
-        '''
-        transpose hidden_states (use trick above) makes list comprehensions straight foreward
-        list( [layer][hidden_states][seq_length] x Tensor([bsz][features]) )
-        list( [hidden_states][layer][seq_length] x Tensor([bsz][features]) )
-        '''
-        hidden_states = list( list(entry) for entry in zip(*hidden_states) )
-
-        if not collectHidden:
-            hiddens = list( list( layer[-1] for layer in hidden ) for hidden in hidden_states ) 
-            '''
-            add seq_length into tensor:
-            tuple( [hidden_states][seq_length] x Tensor([bsz][features] )
-            to
-            tuple( [hidden_states] x Tensor([seq_length][bsz][features] )
-            '''
-            hiddens = tuple( flatten_list( hidden ) for hidden in hiddens )
-            return output, hiddens
-
-        else:
-            '''
-            we want everything returned as
-            list( [hidden_states][layer] x Tensor([seq_length][bsz][features]) )
-            '''
-            hiddens = list( list( flatten_list(layer) for layer in hidden ) for hidden in hidden_states ) 
-            return output, hiddens
+        #Now in format list( [hidden_states][seq_length] x Tensor([layer][bsz][features]) )
+        #Remove seq_length dimension if not collect_hidden
+        if not collect_hidden:
+            hidden_states = list( entry[0] for entry in hidden_states)
+        return output, hidden_states
     
     def reset_parameters(self):
         """
@@ -252,12 +228,12 @@ class stackedRNN(nn.Module):
         for rnn in self.rnns:
             rnn.detach_hidden()
         
-    def reset_hidden(self, bsz):
+    def reset_hidden(self, bsz, reset_mask=None):
         """
         reset_hidden() stub
         """
         for rnn in self.rnns:
-            rnn.reset_hidden(bsz)
+            rnn.reset_hidden(bsz, reset_mask=reset_mask)
 
     def init_inference(self, bsz):    
         """ 
@@ -405,7 +381,12 @@ class RNNCell(nn.Module):
 
         hidden_state = self.hidden[0] if self.n_hidden_states == 1 else self.hidden
 
-        self.hidden = list( self.cell(input, hidden_state, self.w_ih, self.w_hh, b_ih=self.b_ih, b_hh=self.b_hh) )
+        self.hidden = self.cell(input, hidden_state, self.w_ih, self.w_hh, b_ih=self.b_ih, b_hh=self.b_hh)
+        if(self.n_hidden_states > 1):
+            self.hidden = list(self.hidden)
+        else:
+            self.hidden=[self.hidden]
+
 
         if self.output_size != self.hidden_size:
             self.hidden[0] = F.linear(self.hidden[0], self.w_ho)
