@@ -67,7 +67,7 @@ def split_ds(ds, split=[.8,.2,.0], shuffle=True):
             split_ = int(int(proportion) + residual_idx)
             split_inds = inds[start_idx:start_idx+max(split_, 1)]
             rtn_ds[i] = train_val_test_wrapper(ds, split_inds)
-            start_idx += split_    
+            start_idx += split_
             residual_idx %= 1
     return rtn_ds
 
@@ -98,6 +98,9 @@ class csv_dataset(data.Dataset):
         self.label_key = label_key
         self.drop_unlabeled = drop_unlabeled
 
+        if '.tsv' in self.path:
+            self.delim = '\t'
+
         load_path, should_process = get_load_path_and_should_process(self.path, text_key, label_key)
         should_process = should_process or preprocess
 
@@ -113,9 +116,11 @@ class csv_dataset(data.Dataset):
 
  #       data = data.fillna(value=-1)
         try:
-            data = pd.read_csv(load_path, sep=delim, usecols=[text_key, label_key])
+            data = pd.read_csv(load_path, sep=delim, usecols=[text_key, label_key], encoding='latin-1')
         except:
-            data = pd.read_csv(load_path, sep=delim, usecols=[text_key])
+            data = pd.read_csv(load_path, sep=delim, usecols=[text_key], encoding='latin-1')
+
+        data = data.dropna(axis=0)
 
         self.X = data[text_key].values.tolist()
         if should_process:

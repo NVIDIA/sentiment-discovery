@@ -18,17 +18,20 @@ class DistributedBatchSampler(data.sampler.BatchSampler):
         self.sampler.wrap_around = 0
         self.wrap_around = 0
         self.wrap_last = wrap_last
+        self.start_iter = 0
 
     def __iter__(self):
         batch = []
         last_batch = None
+        i = 0
         for idx in self.data_iterator(self.sampler, wrap_around=False):
             batch.append(idx)
             if len(batch) == self.batch_size:
                 tbatch = self._batch(batch)
-#               if last_batch is not None:
-#                    print(np.sum(last_batch == np.array(list(tbatch))-1))
-                yield tbatch
+                if i >= self.start_iter:
+                    yield tbatch
+                    self.start_iter = 0
+                i += 1
                 last_batch = np.array(list(tbatch))
                 batch = []
         batch_len = len(batch)
@@ -76,17 +79,20 @@ class BatchSampler(data.sampler.BatchSampler):
         self.wrap_around = 0
         self.sampler.wrap_around = 0
         self.wrap_last = wrap_last
+        self.start_iter = 0
 
     def __iter__(self):
         batch = []
         last_batch = None
+        i = 0
         for idx in self.data_iterator(self.sampler, wrap_around=False):
             batch.append(idx)
             new_batch_len = len(batch)
             if new_batch_len == self.batch_size:
-#                if last_batch is not None:
-#                    print(last_batch == np.array(list(batch))-1)
-                yield batch
+                if i >= self.start_iter:
+                    yield batch
+                    self.start_iter = 0
+                i += 1
                 last_batch = np.array(list(batch))
                 batch = []
 

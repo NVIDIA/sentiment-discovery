@@ -106,8 +106,7 @@ class lazy_array_loader(object):
         self.read_lock.release()
         #TODO: @raulp figure out mem map byte string bug
         #if mem map'd need to decode byte string to string
-        #rtn = rtn.decode('utf-8')
-        rtn = str(rtn)
+        rtn = rtn.decode('utf-8')
         if self.mem_map:
             rtn = rtn.decode('unicode_escape')
         return rtn

@@ -36,7 +36,7 @@ def get_dataset(path, **kwargs):
     ext = get_ext(path)
     if ext =='.json':
         text = json_dataset(path, **kwargs)
-    elif ext == '.csv':
+    elif ext in ['.csv', '.tsv']:
         text = csv_dataset(path, **kwargs)
     else:
         raise NotImplementedError('data file type %s is not supported'%(ext))

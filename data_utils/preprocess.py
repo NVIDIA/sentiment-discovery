@@ -9,6 +9,7 @@ HTML_CLEANER_REGEX = re.compile('<.*?>')
 
 def clean_html(text):
     """remove html div tags"""
+    text = str(text)
     return re.sub(HTML_CLEANER_REGEX, ' ', text)
 
 def binarize_labels(labels, hard=True):
