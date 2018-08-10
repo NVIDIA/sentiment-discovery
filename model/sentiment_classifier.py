@@ -3,7 +3,6 @@ from torch import nn
 import torch.nn.functional as F
 
 import numpy as np
-
 from model import RNNFeaturizer
 
 class BinaryClassifier(nn.Module):
@@ -25,7 +24,7 @@ class BinaryClassifier(nn.Module):
             if X.size(-1) == self.dense0.weight.size(-1):
                 X = X[:, self.neurons].contiguous()
             torch.cuda.synchronize()
-        return F.linear(X, weight, self.dense0.bias) 
+        return F.linear(X, weight, self.dense0.bias)
 
     def set_neurons(self, num_neurons=None):
         if num_neurons is None:
@@ -59,6 +58,7 @@ class BinaryClassifier(nn.Module):
 
         self.dense0.load_state_dict(sd, strict=strict)
 
+
 class SentimentClassifier(nn.Module):
     """Container module with an encoder, a recurrent module, and a decoder."""
 
@@ -66,12 +66,14 @@ class SentimentClassifier(nn.Module):
         super().__init__()
         self.encoder = RNNFeaturizer(rnn_type, ntoken, ninp, nhid, nlayers, dropout=dropout, all_layers=all_layers)
         self.classifier = BinaryClassifier(num_features=self.encoder.output_size)
-        
+
         self.neurons_ = None
 
-    def forward(self, input, seq_len=None):
+    def forward(self, input, seq_len=None, get_hidden=False):
         self.encoder.rnn.reset_hidden(input.size(1))
-        hidden = self.encoder(input, seq_len=seq_len)
+        hidden = self.encoder(input, seq_len=seq_len, get_hidden=get_hidden)
+        if get_hidden:
+            hidden = hidden[0]
         if self.neurons is not None:
             hidden = hidden[:, self.neurons].contiguous()
         return self.classifier(hidden)

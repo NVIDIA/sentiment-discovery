@@ -1,3 +1,5 @@
+import math
+
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
@@ -13,7 +15,6 @@ class RNNModel(nn.Module):
         self.encoder = nn.Embedding(ntoken, ninp)
         self.decoder = nn.Linear(nhid, ntoken)
         self.rnn=getattr(RNN, rnn_type)(ninp, nhid, nlayers, dropout=dropout)
-
         # Optionally tie weights as in:
         # "Using the Output Embedding to Improve Language Models" (Press & Wolf 2016)
         # https://arxiv.org/abs/1608.05859
@@ -33,6 +34,7 @@ class RNNModel(nn.Module):
     def forward(self, input, reset_mask=None):
         emb = self.drop(self.encoder(input))
         self.rnn.detach_hidden()
+
         output, hidden = self.rnn(emb, reset_mask=reset_mask)
         output = self.drop(output)
         decoded = self.decoder(output.view(output.size(0)*output.size(1), output.size(2)))
@@ -52,6 +54,7 @@ class RNNModel(nn.Module):
         self.encoder.load_state_dict(state_dict['encoder']['encoder'], strict=strict)
         self.rnn.load_state_dict(state_dict['encoder']['rnn'], strict=strict)
 
+
 class RNNFeaturizer(nn.Module):
     """Container module with an encoder, a recurrent module, and a decoder."""
 
@@ -67,33 +70,50 @@ class RNNFeaturizer(nn.Module):
         self.all_layers = all_layers
         self.output_size = self.nhid if not self.all_layers else self.nhid * self.nlayers
 
-    def forward(self, input, seq_len=None):
+    def forward(self, input, seq_len=None, get_hidden=False):
         self.rnn.detach_hidden()
         if seq_len is None:
             for i in range(input.size(0)):
                 emb = self.drop(self.encoder(input[i]))
-                _, hidden = self.rnn(emb.unsqueeze(0), collectHidden=True)
-            cell = self.get_cell_features(hidden)
+                _, hidden = self.rnn(emb.unsqueeze(0), collect_hidden=True)
+            cell = self.get_features(hidden)
+            if get_hidden:
+                cell = (self.get_features(hidden, get_hidden=True), cell)
         else:
-            last_cell = 0
+            last_cell = last_hidden = 0
             for i in range(input.size(0)):
                 emb = self.drop(self.encoder(input[i]))
-                _, hidden = self.rnn(emb.unsqueeze(0), collectHidden=True)
-                cell = self.get_cell_features(hidden)
+                _, hidden = self.rnn(emb.unsqueeze(0), collect_hidden=True)
+
+                cell = self.get_features(hidden)
+                if get_hidden:
+                    hidden = self.get_features(hidden, get_hidden=True)
+
                 if i > 0:
                     cell = get_valid_outs(i, seq_len, cell, last_cell)
-                last_cell = cell   
+                    if get_hidden:
+                        hidden = get_valid_outs(i, seq_len, hidden, last_hidden)
+
+                last_cell = cell
+                if get_hidden:
+                    last_hidden = hidden
+
+            if get_hidden:
+                cell = (hidden, cell)
+
         return cell
 
-    def get_cell_features(self, hidden):
-        cell = hidden[1]
-        #get cell state from layers
-        if self.all_layers:
-            cell = torch.cat(cell, -1)
+    def get_features(self, hidden, get_hidden=False):
+        if not get_hidden:
+            cell = hidden[1]
         else:
-            cell = cell[-1]
-        return cell[-1]
-
+            cell = hidden[0]
+        #get cell state from layers
+        cell = cell[0]
+        if self.all_layers:
+            return torch.cat(cell, -1)
+        else:
+            return cell[0]
 
     def state_dict(self, destination=None, prefix='', keep_vars=False):
         sd = {}

@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 
+
 from fp16 import FP16_Module, FP16_Optimizer
 
 import data
@@ -19,7 +20,7 @@ from learning_rates import LinearLR
 
 parser = argparse.ArgumentParser(description='PyTorch Sentiment-Discovery Language Modeling')
 parser.add_argument('--model', type=str, default='mLSTM',
-                    help='type of recurrent net (RNNTanh, RNNReLU, LSTM, mLSTM, GRU)')
+                    help='type of recurrent net (Tanh, ReLU, LSTM, mLSTM, GRU)')
 parser.add_argument('--emsize', type=int, default=64,
                     help='size of word embeddings')
 parser.add_argument('--nhid', type=int, default=4096,
@@ -28,6 +29,9 @@ parser.add_argument('--nlayers', type=int, default=1,
                     help='number of layers')
 parser.add_argument('--lr', type=float, default=5e-4,
                     help='initial learning rate')
+parser.add_argument('--constant_decay', type=int, default=None,
+                    help='number of iterations to decay LR over,' + \
+                         ' None means decay to zero over training')
 parser.add_argument('--clip', type=float, default=0,
                     help='gradient clipping')
 parser.add_argument('--epochs', type=int, default=1,
@@ -36,7 +40,7 @@ parser.add_argument('--dropout', type=float, default=0.0,
                     help='dropout applied to layers (0 = no dropout)')
 parser.add_argument('--tied', action='store_true',
                     help='tie the word embedding and softmax weights')
-parser.add_argument('--seed', type=int, default=-1,
+parser.add_argument('--seed', type=int, default=1234,
                     help='random seed')
 parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                     help='report interval')
@@ -44,8 +48,12 @@ parser.add_argument('--save', type=str,  default='lang_model.pt',
                     help='path to save the final model')
 parser.add_argument('--load', type=str, default='',
                     help='path to a previously saved model checkpoint')
+parser.add_argument('--load_optim', action='store_true',
+                    help='load most recent optimizer to resume training')
 parser.add_argument('--save_iters', type=int, default=2000, metavar='N',
                     help='save current model progress interval')
+parser.add_argument('--save_optim', action='store_true',
+                    help='save most recent optimizer')
 parser.add_argument('--fp16', action='store_true',
                     help='Run model in pseudo-fp16 mode (fp16 storage fp32 math).')
 parser.add_argument('--dynamic_loss_scale', action='store_true',
@@ -62,6 +70,8 @@ parser.add_argument('--rank', type=int, default=-1,
                     help='distributed worker rank. Typically set automatically from multiproc.py')
 parser.add_argument('--optim', default='Adam',
                     help='One of PyTorch\'s optimizers (Adam, SGD, etc). Default: Adam')
+parser.add_argument('--tcp-port', type=int, default=6000,
+                   help='tcp port so as to avoid address already in use errors')
 
 # Add dataset args to argparser and set some defaults
 data_config, data_parser = configure_data(parser)
@@ -97,17 +107,18 @@ if args.rank > 0:
 if args.world_size > 1:
     distributed_init_file = os.path.splitext(args.save)[0]+'.distributed.dpt'
     torch.distributed.init_process_group(backend=args.distributed_backend, world_size=args.world_size,
-                                                    init_method='file://'+distributed_init_file, rank=args.rank)
+                                         init_method='tcp://localhost:{}'.format(args.tcp_port), rank=args.rank)
+#                                                    init_method='file://'+distributed_init_file, rank=args.rank)
 
 # Set the random seed manually for reproducibility.
-if args.seed is not -1:
+if args.seed > 0:
     torch.manual_seed(args.seed)
     if args.cuda:
         torch.cuda.manual_seed(args.seed)
 
 if args.loss_scale != 1 and args.dynamic_loss_scale:
     raise RuntimeError("Static loss scale and dynamic loss scale cannot be used together.")
-    
+
 ###############################################################################
 # Load data
 ###############################################################################
@@ -123,7 +134,7 @@ if args.loss_scale != 1 and args.dynamic_loss_scale:
 # batch processing.
 #
 # The unsupervised dataset further splits the corpus into shards through which
-# the hidden state is persisted. The dataset also produces a hidden state 
+# the hidden state is persisted. The dataset also produces a hidden state
 # reset mask that resets the hidden state at the start of every shard. A valid
 # mask might look like
 # ┌ 1 0 0 0 0 0 ... 0 0 0 1 0 0 ... ┐
@@ -131,7 +142,6 @@ if args.loss_scale != 1 and args.dynamic_loss_scale:
 # │ 1 0 0 0 0 0 ... 0 0 1 0 0 0 ... │
 # └ 1 0 0 0 0 0 ... 1 0 0 0 0 0 ... ┘.
 # With 1 indicating to reset hidden state at that particular minibatch index
- 
 train_data, val_data, test_data = data_config.apply(args)
 
 ###############################################################################
@@ -146,8 +156,14 @@ if args.cuda:
 
 rnn_model = model
 
+optim = None
 if args.load != '':
-    sd = torch.load(args.load)
+    sd = torch.load(args.load, map_location='cpu')
+    if args.load_optim:
+        optim_sd = torch.load(os.path.join(os.path.dirname(args.load), 'optim.pt'), map_location='cpu')
+        rng = torch.load(os.path.join(os.path.dirname(args.load), 'rng.pt'))
+        torch.cuda.set_rng_state(rng[0])
+        torch.set_rng_state(rng[1])
     try:
         model.load_state_dict(sd)
     except:
@@ -156,22 +172,33 @@ if args.load != '':
         remove_weight_norm(model.rnn)
 
 if not args.no_weight_norm:
-    apply_weight_norm(model.rnn, hook_child=False)
+    apply_weight_norm(model, 'rnn', hook_child=False)
 
 # create optimizer and fp16 models
 if args.fp16:
     model = FP16_Module(model)
     optim = eval('torch.optim.'+args.optim)(model.parameters(), lr=args.lr)
-    optim = FP16_Optimizer(optim, 
-                           static_loss_scale=args.loss_scale,
-                           dynamic_loss_scale=args.dynamic_loss_scale)
+    optim = FP16_Optimizer(optim,
 else:
     optim = eval('torch.optim.'+args.optim)(model.parameters(), lr=args.lr)
 
+if args.load_optim:
+    pass
+    optim.load_state_dict(optim_sd)
+
 # add linear learning rate scheduler
 if train_data is not None:
-    num_iters = len(train_data) * args.epochs
-    LR = LinearLR(optim, num_iters)
+    if args.constant_decay:
+        num_iters = args.constant_decay
+    else:
+        num_iters = len(train_data) * args.epochs
+
+    init_step = -1
+    if args.load_optim:
+        init_step = optim_sd['iter']-optim_sd['skipped_iter']
+        train_data.batch_sampler.start_iter = (optim_sd['iter'] % len(train_data)) + 1
+
+    LR = LinearLR(optim, num_iters, last_iter=init_step)
 
 # wrap model for distributed training
 if args.world_size > 1:
@@ -191,7 +218,7 @@ criterion = nn.CrossEntropyLoss()
 # Note that despite the name of the function, the subdivison of data is not
 # done along the batch dimension (i.e. dimension 1), since that was handled
 # by the data loader. The chunks are along dimension 0, corresponding
-# to the seq_len dimension in the LSTM. A Variable representing an appropriate 
+# to the seq_len dimension in the LSTM. A Variable representing an appropriate
 # shard reset mask of the same dimensions is also returned.
 
 def get_batch(data):
@@ -219,30 +246,53 @@ def evaluate(data_source):
             data, targets, reset_mask = get_batch(batch)
             output, hidden = model(data, reset_mask=reset_mask)
             output_flat = output.view(-1, ntokens).contiguous().float()
-            total_loss += criterion(output_flat, targets.view(-1).contiguous()).data[0]
+            loss = criterion(output_flat, targets.view(-1).contiguous())
+            if isinstance(model, DDP):
+                torch.distributed.all_reduce(loss.data)
+                loss.data /= args.world_size
+            total_loss += loss.data[0]
     return total_loss / max(len(data_source), 1)
 
-def train(total_iters=0):
+class dummyloader(object):
+    def __init__(self, sample, num_iters=1000):
+        self.num_iters = num_iters
+        self.sample = sample
+
+    def __iter__(self):
+        for x in range(self.num_iters):
+            yield [s.detach() for s in self.sample]
+
+    def __len__(self):
+        return self.num_iters
+
+
+def train(total_iters=0, skipped_iters=0, elapsed_time=False):
     # Turn on training mode which enables dropout.
     model.train()
     total_loss = 0
     start_time = time.time()
+    t0 = start_time
     ntokens = args.data_size
     hidden = init_hidden(args.batch_size)
     curr_loss = 0.
+    distributed = isinstance(model, DDP)
     for i, batch in enumerate(train_data):
 
         data, targets, reset_mask = get_batch(batch)
-        output, hidden = model(data, reset_mask=reset_mask)
-        loss = criterion(output.view(-1, ntokens).contiguous().float(), targets.view(-1).contiguous())
-
         optim.zero_grad()
+        output, hidden = model(data, reset_mask=reset_mask)
+        loss = criterion(output.view(-1, ntokens).contiguous().float(), targets2use.view(-1).contiguous())
+        total_loss += loss.data.float()
 
         if args.fp16:
-            optim.backward(loss)
+            optim.backward(loss, update_master_grads=False)
         else:
             loss.backward()
-        total_loss += loss.data.float()
+
+        if distributed:
+            torch.distributed.all_reduce(loss.data)
+            loss.data /= args.world_size
+            model.allreduce_params()
 
 
         # clipping gradients helps prevent the exploding gradient problem in RNNs / LSTMs.
@@ -250,42 +300,60 @@ def train(total_iters=0):
             if not args.fp16:
                 torch.nn.utils.clip_grad_norm(model.parameters(), args.clip)
             else:
-                optim.clip_fp32_grads(clip=args.clip)
+                optim.clip_master_grads(clip=args.clip)
+
+        if args.fp16:
+            optim.update_master_grads()
+
         optim.step()
 
         # step learning rate and log training progress
-        lr = LR.get_lr()[0]
+        lr = optim.param_groups[0]['lr']
         if not args.fp16:
             LR.step()
         else:
             # if fp16 optimizer skips gradient step due to explosion do not step lr
             if not optim.overflow:
                 LR.step()
+            else:
+                skipped_iters += 1
 
-        if i % args.log_interval == 0:
+        if i % args.log_interval == 0 and i != 0:
             cur_loss = total_loss[0] / args.log_interval
-            elapsed = time.time() - start_time
-            print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:.2E} | ms/batch {:.3E} | \
+            cur_time = time.time()
+            elapsed = cur_time - start_time
+            total_elapsed = cur_time - t0 + elapsed_time
+            print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:.2E} | ms/batch {:.3E} | total time {:.3E}\
                   loss {:.2E} | ppl {:8.2f} | loss scale {:8.2f}'.format(
                       epoch, i, len(train_data), lr,
-                      elapsed * 1000 / args.log_interval, cur_loss, math.exp(min(cur_loss, 20)),
-                      args.loss_scale if not args.fp16 else optim.loss_scale 
+                      elapsed * 1000 / args.log_interval, total_elapsed, cur_loss, math.exp(min(cur_loss, 20)),
+                      args.loss_scale if not args.fp16 else optim.loss_scale
                   )
             )
             total_loss = 0
-            start_time = time.time()
+            start_time = cur_time
             sys.stdout.flush()
 
         # save current model progress. If distributed only save from worker 0
-        if args.save_iters and total_iters % (args.save_iters) == 0 and total_iters > 0 and args.rank < 1:
+        if args.save_iters and total_iters % args.save_iters == 0 and total_iters > 0 and args.rank < 1:
             if args.rank < 1:
                 with open(os.path.join(os.path.splitext(args.save)[0], 'e%s.pt'%(str(total_iters),)), 'wb') as f:
                     torch.save(model.state_dict(), f)
+                if args.save_optim:
+                    with open(os.path.join(os.path.splitext(args.save)[0], 'optim.pt'), 'wb') as f:
+                        optim_sd = optim.state_dict()
+                        optim_sd['iter'] = total_iters
+                        optim_sd['skipped_iter'] = skipped_iters
+                        torch.save(optim_sd, f)
+                        del optim_sd
+
+                    with open(os.path.join(os.path.splitext(args.save)[0], 'rng.pt'), 'wb') as f:
+                        torch.save((torch.cuda.get_rng_state(), torch.get_rng_state()),f)
             if args.cuda:
                 torch.cuda.synchronize()
         total_iters += 1
 
-    return cur_loss
+    return cur_loss, skipped_iters
 
 # Loop over epochs.
 lr = args.lr
@@ -298,9 +366,15 @@ if args.save_iters > 0 and not os.path.exists(os.path.splitext(args.save)[0]) an
 # At any point you can hit Ctrl + C to break out of training early.
 try:
     total_iters = 0
+    elapsed_time = 0
+    skipped_iters = 0
+    if args.load_optim:
+        total_iters = optim_sd['iter']
+        skipped_iters = optim_sd['skipped_iter']
     for epoch in range(1, args.epochs+1):
         epoch_start_time = time.time()
-        val_loss = train(total_iters)
+        val_loss, skipped_iters = train(total_iters, skipped_iters, elapsed_time)
+        elapsed_time += time.time() - epoch_start_time
         total_iters += len(train_data)
         if val_data is not None:
             print('entering eval')
@@ -312,10 +386,8 @@ try:
         print('-' * 89)
         # Save the model if the validation loss is the best we've seen so far.
         if not best_val_loss or val_loss < best_val_loss and args.rank <= 0:
-            with open(args.save, 'wb') as f:
-                torch.save(model.state_dict(), f)
+            torch.save(model.state_dict(), args.save)
             best_val_loss = val_loss
-        torch.cuda.synchronize()
 
 except KeyboardInterrupt:
     print('-' * 89)
@@ -323,15 +395,12 @@ except KeyboardInterrupt:
 
 # Load the best saved model.
 if os.path.exists(args.save):
-    with open(args.save, 'rb') as f:
-        model.load_state_dict(torch.load(f))
+    model.load_state_dict(torch.load(args.save, 'cpu'))
 
 if not args.no_weight_norm and args.rank <= 0:
     remove_weight_norm(rnn_model)
     with open(args.save, 'wb') as f:
         torch.save(model.state_dict(), f)
-if args.cuda:
-    torch.cuda.synchronize()
 
 if test_data is not None:
     # Run on test data.

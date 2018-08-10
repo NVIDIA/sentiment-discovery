@@ -13,7 +13,7 @@ class DistributedDataParallel(Module):
 
         self.module = module
 
-        for p in self.module.state_dict().values():
+        for p in self.module.parameters():
             if torch.is_tensor(p):
                 dist.broadcast(p, 0)
 
@@ -47,20 +47,21 @@ class DistributedDataParallel(Module):
         for param in list(self.module.parameters()):
             def allreduce_hook(*unused):
                 Variable._execution_engine.queue_callback(allreduce_params)
-            handle = param.register_hook(allreduce_hook)
-            self.hooks.append(allreduce_hook)
-            self.hook_handles.append(handle)
+        #    handle = param.register_hook(allreduce_hook)
+            #self.hooks.append(allreduce_hook)
+            #self.hook_handles.append(handle)
+        self.allreduce_params = allreduce_params
 
     def forward(self, *inputs, **kwargs):
         self.needs_reduction = True
         return self.module(*inputs, **kwargs)
 
     def state_dict(self, destination=None, prefix='', keep_vars=False):
-        [h.remove() for h in self.hook_handles]
+        #[h.remove() for h in self.hook_handles]
         sd = self.module.state_dict(destination, prefix, keep_vars)
-        for handle, hook in zip(self.hook_handles, self.hooks):
-            d = handle.hooks_dict_ref()
-            d[handle.id] = hook
+       # for handle, hook in zip(self.hook_handles, self.hooks):
+       #     d = handle.hooks_dict_ref()
+       #     d[handle.id] = hook
 
         return sd
 

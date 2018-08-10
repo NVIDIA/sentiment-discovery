@@ -35,11 +35,11 @@ parser.add_argument('--nlayers', type=int, default=1,
                     help='number of layers')
 parser.add_argument('--all_layers', action='store_true',
                     help='if more than one layer is used, extract features from all layers, not just the last layer')
-parser.add_argument('--epochs', type=int, default=100,
+parser.add_argument('--epochs', type=int, default=40,
                     help='number of epochs to run Logistic Regression')
 parser.add_argument('--seed', type=int, default=42,
                     help='random seed')
-parser.add_argument('--load_model', type=str,  default='lang_model.pt', required=True,
+parser.add_argument('--load_model', type=str,  default='lang_model.pt',
                     help='path to trained world language model')
 parser.add_argument('--save_results', type=str,  default='sentiment',
                     help='path to save intermediate and final results of transfer')
@@ -55,13 +55,18 @@ parser.add_argument('--use_cached', action='store_true',
                     help='reuse cached featurizations from a previous from last time')
 parser.add_argument('--drop_neurons', action='store_true',
                     help='drop top neurons instead of keeping them')
+parser.add_argument('--data-path', type=str, default=None,
+                    help='path to singleton dataset (used for first-time tweet datasets)')
+parser.add_argument('--get-hidden', action='store_true',
+                    help='whether to use the hidden state (as opposed to cell state) as features for classifier')
 
 data_config, data_parser = configure_data(parser)
+data_parser.set_defaults(split='1.', data='data/binary_sst/train.csv')
+data_parser.set_defaults(valid='data/binary_sst/val.csv', test='data/binary_sst/test.csv')
+args = parser.parse_args()
 
 data_parser.set_defaults(split='1.', data='data/binary_sst/train.csv')
 data_parser.set_defaults(valid='data/binary_sst/val.csv', test='data/binary_sst/test.csv')
-
-args = parser.parse_args()
 
 args.cuda = torch.cuda.is_available()
 
@@ -130,7 +135,8 @@ def transform(model, text):
             n += batch_size
             model.rnn.reset_hidden(batch_size)
             # extract batch of features from text batch
-            cell = model(text_batch, length_batch).float()
+            cell = model(text_batch, length_batch, args.get_hidden)
+
             if first_feature:
                 features = []
                 first_feature = False
@@ -138,7 +144,7 @@ def transform(model, text):
             labels.append(labels_batch.data.cpu().numpy())
             features.append(cell.data.cpu().numpy())
 
-            num_char = length_batch.sum().data.item()
+            num_char = int(length_batch.sum().cpu().numpy())
 
             end = time.time()
             elapsed_time = end - start
@@ -150,7 +156,7 @@ def transform(model, text):
             if elapsed_time == 0:
                 ch_per_s = num_char
             else:
-                ch_per_s = num_char / elapsed_time
+                ch_per_s = num_char / (elapsed_time+1e-8)
             print('batch {:5d}/{:5d} | ch/s {:.2E} | time {:.2E} | time left {:.2E}'.format(i, len_ds, ch_per_s, elapsed_time, timeleft))
 
     if not first_feature:
@@ -162,7 +168,7 @@ def transform(model, text):
 
 def score_and_predict(model, X, Y):
     '''
-    Given a binary classification model, predict output classification for numpy features `X` 
+    Given a binary classification model, predict output classification for numpy features `X`
     and evaluate accuracy against labels `Y`. Labels should be numpy array of 0s and 1s.
     Returns (accuracy, numpy array of classification probabilities)
     '''
@@ -374,8 +380,13 @@ if not args.fp16:
 else:
     clf_sd = {'weight': torch.from_numpy(logreg_model.coef_).half(), 'bias': torch.from_numpy(logreg_model.intercept_).half()}
 sd['classifier'] = clf_sd
+model.float().cpu()
 sd['encoder'] = model.state_dict()
 with open(os.path.join(save_root, 'classifier.pt'), 'wb') as f:
+    torch.save(sd, f)
+model.half()
+sd['encoder'] = model.state_dict()
+with open(os.path.join(save_root, 'classifier.pt.16'), 'wb') as f:
     torch.save(sd, f)
 
 # extract sentiment neuron indices
@@ -386,6 +397,21 @@ print('using neuron(s) %s as features for regression'%(', '.join([str(neuron) fo
 start = time.time()
 logreg_neuron_model, logreg_neuron_scores, logreg_neuron_probs, neuron_c, neuron_nnotzero = train_logreg(trXt, trY, vaXt, vaY, teXt, teY, max_iter=args.epochs, eval_test=not args.no_test_eval, seed=args.seed, neurons=sentiment_neurons, drop_neurons=args.drop_neurons)
 end = time.time()
+
+if args.drop_neurons:
+    with open(os.path.join(save_root, 'dropped_neurons_score.txt'), 'w') as f:
+        f.write(str(logreg_neuron_scores))
+
+    with open(os.path.join(save_root, 'dropped_neurons_probs.pkl'), 'wb') as f:
+        pkl.dump(logreg_neuron_probs, f)
+
+    print('%d dropped neuron regression took %s seconds'%(args.neurons, str(end-start)))
+    print(', '.join([str(score) for score in logreg_neuron_scores]), 'train, val, test accuracy for %d dropped neuron regression'%(args.neurons))
+    print(str(neuron_c)+' regularization coefficient used')
+
+    start = time.time()
+    logreg_neuron_model, logreg_neuron_scores, logreg_neuron_probs, neuron_c, neuron_nnotzero = train_logreg(trXt, trY, vaXt, vaY, teXt, teY, max_iter=args.epochs, eval_test=not args.no_test_eval, seed=args.seed, neurons=sentiment_neurons)
+    end = time.time()
 
 print('%d neuron regression took %s seconds'%(args.neurons, str(end-start)))
 print(', '.join([str(score) for score in logreg_neuron_scores]), 'train, val, test accuracy for %d neuron regression'%(args.neurons))
