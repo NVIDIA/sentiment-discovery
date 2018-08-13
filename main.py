@@ -278,6 +278,14 @@ def train(total_iters=0, skipped_iters=0, elapsed_time=False):
     hidden = init_hidden(args.batch_size)
     curr_loss = 0.
     distributed = isinstance(model, DDP)
+    max_iters = len(train_data)
+    def log(epoch, i, lr, ms_iter, total_time, loss, scale):
+        print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:.2E} | ms/batch {:.3E} | total time {:.3E}\
+                  loss {:.2E} | ppl {:8.2f} | loss scale {:8.2f}'.format(
+                      epoch, i, max_iters, lr,
+                      ms_iter, total_time, loss, math.exp(min(loss, 20)), scale
+                  )
+        )
     for i, batch in enumerate(train_data):
 
         data, targets, reset_mask = get_batch(batch)
@@ -320,18 +328,14 @@ def train(total_iters=0, skipped_iters=0, elapsed_time=False):
             else:
                 skipped_iters += 1
 
-        if i % args.log_interval == 0 and i != 0:
+        # log current results
+        if ((i+1) % args.log_interval == 0) and (i != max_iters - 1):
             cur_loss = total_loss[0] / args.log_interval
             cur_time = time.time()
             elapsed = cur_time - start_time
             total_elapsed = cur_time - t0 + elapsed_time
-            print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:.2E} | ms/batch {:.3E} | total time {:.3E}\
-                  loss {:.2E} | ppl {:8.2f} | loss scale {:8.2f}'.format(
-                      epoch, i, len(train_data), lr,
-                      elapsed * 1000 / args.log_interval, total_elapsed, cur_loss, math.exp(min(cur_loss, 20)),
-                      args.loss_scale if not args.fp16 else optim.loss_scale
-                  )
-            )
+            log(epoch, i+1, lr, elapsed * 1000 / args.log_interval, total_elapsed, 
+                cur_loss, args.loss_scale if not args.fp16 else optim.loss_scale)
             total_loss = 0
             start_time = cur_time
             sys.stdout.flush()
@@ -354,6 +358,16 @@ def train(total_iters=0, skipped_iters=0, elapsed_time=False):
             if args.cuda:
                 torch.cuda.synchronize()
         total_iters += 1
+    #final logging
+    elapsed_iters = max_iters % args.log_interval
+    if elapsed_iters == 0:
+        elapsed_iters = args.log_interval
+    cur_loss = total_loss[0] / elapsed_iters
+    cur_time = time.time()
+    elapsed = cur_time - start_time
+    total_elapsed = cur_time - t0 + elapsed_time
+    log(epoch, max_iters, lr, elapsed * 1000/ elapsed_iters, total_elapsed,
+        cur_loss, args.loss_scale if not args.fp16 else optim.loss_scale)
 
     return cur_loss, skipped_iters
 
