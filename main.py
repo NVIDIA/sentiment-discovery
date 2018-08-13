@@ -179,6 +179,8 @@ if args.fp16:
     model = FP16_Module(model)
     optim = eval('torch.optim.'+args.optim)(model.parameters(), lr=args.lr)
     optim = FP16_Optimizer(optim,
+                           static_loss_scale=args.loss_scale,	
+                           dynamic_loss_scale=args.dynamic_loss_scale)
 else:
     optim = eval('torch.optim.'+args.optim)(model.parameters(), lr=args.lr)
 
@@ -281,7 +283,7 @@ def train(total_iters=0, skipped_iters=0, elapsed_time=False):
         data, targets, reset_mask = get_batch(batch)
         optim.zero_grad()
         output, hidden = model(data, reset_mask=reset_mask)
-        loss = criterion(output.view(-1, ntokens).contiguous().float(), targets2use.view(-1).contiguous())
+        loss = criterion(output.view(-1, ntokens).contiguous().float(), targets.view(-1).contiguous())
         total_loss += loss.data.float()
 
         if args.fp16:
