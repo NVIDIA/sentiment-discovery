@@ -62,6 +62,7 @@ class lazy_array_loader(object):
         self.file = self._file
         #memory map file if necessary
         self.mem_map = mem_map
+        print('mmap', self.mem_map)
         if self.mem_map:
             self.file = mmap.mmap(self.file.fileno(), 0, prot=mmap.PROT_READ)
         lenpath = os.path.join(lazypath, data_type+'.len.pkl')
@@ -94,7 +95,7 @@ class lazy_array_loader(object):
         """read specified portion of file"""
         #TODO: Solve race condition
         #Seek to start of file read
-        self.read_lock.acquire()
+        #self.read_lock.acquire()
         self.file.seek(start)
         ##### Getting context-switched here
         #read to end of file if no end point provided
@@ -103,7 +104,7 @@ class lazy_array_loader(object):
         #else read amount needed to reach end point
         else:
             rtn = self.file.read(end-start)
-        self.read_lock.release()
+        #self.read_lock.release()
         #TODO: @raulp figure out mem map byte string bug
         #if mem map'd need to decode byte string to string
         rtn = rtn.decode('utf-8')

@@ -56,62 +56,75 @@ def get_lazy(path, text_key, label_key, preprocess=False, data_shard='data', loo
     return lazy_array_loader(processed_path, data_type=data_shard)
 
 def handle(path, text_key, label_key, preprocess=False, split=[1.], loose=False,
-                binarize_sent=False, delim=',', drop_unlabeled=False):
+                binarize_sent=False, delim=',', drop_unlabeled=False, lazy=False):
     """gets a dataset and handles splitting it into train/val/test if necessary"""
     text = get_dataset(path, preprocess=preprocess, text_key=text_key, label_key=label_key,
                 binarize_sent=binarize_sent, delim=delim, drop_unlabeled=drop_unlabeled, loose_json=loose)
+    if lazy:
+        if not exists_lazy(text.processed_path, data_type='data'):
+            make_lazy(text.processed_path, text.X, data_type='data')
+        text = lazy_array_loader(text.processed_path, data_type='data')
     if should_split(split):
         return split_ds(text, split)
     return text
 
-def handle_lazy(path, text_key, label_key, preprocess=False, split=[1.], loose=False,
-                binarize_sent=False, delim=',', drop_unlabeled=False):
-    """
-    returns lazy datset, and splits it if appropriate.
-    Saves split and reloads it exactly as is.
-    If all parts of split do not exist when reloading then the entire dataset is reprocessed, split, and saved
-    """
-    if not should_split(split):
-        return get_lazy(path, text_key, label_key, preprocess=preprocess, data_shard='data',
-                binarize_sent=binarize_sent, delim=delim, drop_unlabeled=drop_unlabeled, loose=loose)
-    else:
-        missing_split = False
-        processed_path = get_processed_path(path, text_key, label_key)
-        lazy_dir = get_lazy_path(processed_path)
-        split_names = []
-        for i, s in enumerate(split):
-            data_shard = get_split_name(i, s)
-            split_names.append(data_shard)
-            if s != 0:
-                missing_split = missing_split or not exists_lazy(processed_path, data_type=data_shard)
+#def handle(path, text_key, label_key, preprocess=False, split=[1.], loose=False,
+#                binarize_sent=False, delim=',', drop_unlabeled=False):
+#    """gets a dataset and handles splitting it into train/val/test if necessary"""
+#    text = get_dataset(path, preprocess=preprocess, text_key=text_key, label_key=label_key,
+#                binarize_sent=binarize_sent, delim=delim, drop_unlabeled=drop_unlabeled, loose_json=loose)
+#    if should_split(split):
+#        return split_ds(text, split)
+#    return text
 
-        rtn_ds = []
-        if missing_split:
-            files_to_remove = [os.path.join(lazy_dir, f) for f in os.listdir()]
-            for f, filename in enumerate(files_to_remove):
-                try:
-                    os.remove(filename)
-                except:
-                    pass
-            ds = handle(path, preprocess=preprocess, text_key=text_key, label_key=label_key, split=split,
-                        binarize_sent=binarize_sent, delim=delim, drop_unlabeled=drop_unlabeled, loose=loose)
-            for d, data_set in enumerate(ds):
-                lazy_ds = None
-                if data_set is not None:
-                    data_shard = split_names[d]
-                    lazy_ds = get_lazy(path, text_key, label_key, preprocess=preprocess, data_shard=data_shard,
-                        binarize_sent=binarize_sent, delim=delim, drop_unlabeled=drop_unlabeled, ds=data_set)
-                rtn_ds.append(lazy_ds)
-        else:
-            for i, data_shard in enumerate(split_names):
-                p = split[i]
-                lazy_ds = None
-                if p != 0:
-                    data_shard = split_names[i]
-                    lazy_ds = get_lazy(path, text_key, label_key, preprocess=preprocess, data_shard=data_shard,
-                        binarize_sent=binarize_sent, delim=delim, drop_unlabeled=drop_unlabeled)
-                rtn_ds.append(lazy_ds)
-        return rtn_ds
+#def handle_lazy(path, text_key, label_key, preprocess=False, split=[1.], loose=False,
+#                binarize_sent=False, delim=',', drop_unlabeled=False):
+#    """
+#    returns lazy datset, and splits it if appropriate.
+#    Saves split and reloads it exactly as is.
+#    If all parts of split do not exist when reloading then the entire dataset is reprocessed, split, and saved
+#    """
+#    if not should_split(split):
+#        return get_lazy(path, text_key, label_key, preprocess=preprocess, data_shard='data',
+#                binarize_sent=binarize_sent, delim=delim, drop_unlabeled=drop_unlabeled, loose=loose)
+#    else:
+#        missing_split = False
+#        processed_path = get_processed_path(path, text_key, label_key)
+#        lazy_dir = get_lazy_path(processed_path)
+#        split_names = []
+#        for i, s in enumerate(split):
+#            data_shard = get_split_name(i, s)
+#            split_names.append(data_shard)
+#            if s != 0:
+#                missing_split = missing_split or not exists_lazy(processed_path, data_type=data_shard)
+#
+#        rtn_ds = []
+#        if missing_split:
+#            files_to_remove = [os.path.join(lazy_dir, f) for f in os.listdir()]
+#            for f, filename in enumerate(files_to_remove):
+#                try:
+#                    os.remove(filename)
+#                except:
+#                    pass
+#            ds = handle(path, preprocess=preprocess, text_key=text_key, label_key=label_key, split=split,
+#                        binarize_sent=binarize_sent, delim=delim, drop_unlabeled=drop_unlabeled, loose=loose)
+#            for d, data_set in enumerate(ds):
+#                lazy_ds = None
+#                if data_set is not None:
+#                    data_shard = split_names[d]
+#                    lazy_ds = get_lazy(path, text_key, label_key, preprocess=preprocess, data_shard=data_shard,
+#                        binarize_sent=binarize_sent, delim=delim, drop_unlabeled=drop_unlabeled, ds=data_set)
+#                rtn_ds.append(lazy_ds)
+#        else:
+#            for i, data_shard in enumerate(split_names):
+#                p = split[i]
+#                lazy_ds = None
+#                if p != 0:
+#                    data_shard = split_names[i]
+#                    lazy_ds = get_lazy(path, text_key, label_key, preprocess=preprocess, data_shard=data_shard,
+#                        binarize_sent=binarize_sent, delim=delim, drop_unlabeled=drop_unlabeled)
+#                rtn_ds.append(lazy_ds)
+#        return rtn_ds
 
 
 def post_process_ds(ds, seq_length, cache=False, cache_size=1, cache_block_size=64,
@@ -128,12 +141,14 @@ def make_dataset(path, seq_length, text_key, label_key, lazy=False, preprocess=F
                 persist_state=0, cache=False, cache_size=1, cache_block_size=64, delim=',', loose=False,
                 binarize_sent=False, drop_unlabeled=False, ds_type='supervised', num_shards=1002):
     """returns dataset. returns train/val/test datasets if split is specified. returns None if split proportion is 0."""
-    if lazy:
-        ds = handle_lazy(path, preprocess=preprocess, text_key=text_key, label_key=label_key, split=split,
-                binarize_sent=binarize_sent, delim=delim, drop_unlabeled=drop_unlabeled, loose=loose)
-    else:
-        ds = handle(path, preprocess=preprocess, text_key=text_key, label_key=label_key, split=split,
-                    binarize_sent=binarize_sent, delim=delim, drop_unlabeled=drop_unlabeled, loose=loose)
+    #if lazy:
+    #    ds = handle_lazy(path, preprocess=preprocess, text_key=text_key, label_key=label_key, split=split,
+    #            binarize_sent=binarize_sent, delim=delim, drop_unlabeled=drop_unlabeled, loose=loose)
+    #else:
+    #    ds = handle(path, preprocess=preprocess, text_key=text_key, label_key=label_key, split=split,
+    #                binarize_sent=binarize_sent, delim=delim, drop_unlabeled=drop_unlabeled, loose=loose)
+    ds = handle(path, preprocess=preprocess, text_key=text_key, label_key=label_key, split=split,
+                binarize_sent=binarize_sent, delim=delim, drop_unlabeled=drop_unlabeled, loose=loose, lazy=lazy)
 
     if should_split(split):
         datasets = []

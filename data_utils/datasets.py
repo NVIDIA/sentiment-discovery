@@ -1,4 +1,5 @@
 import os
+import time
 from operator import itemgetter
 from bisect import bisect_left
 import json
@@ -40,14 +41,31 @@ class train_val_test_wrapper(data.Dataset):
     def __init__(self, ds, split_inds):
         self.split_inds = list(split_inds)
         self.wrapped_data = ds
-        self.X = itemgetter(*split_inds)(ds.X)
-        self.Y = np.array(itemgetter(*split_inds)(ds.Y))
+        self.is_lazy = isinstance(ds, lazy_array_loader)
+        if self.is_lazy:
+            print('lazy')
+            self.ends = itemgetter(*self.split_inds)(self.wrapped_data.ends)
+        self._X = None
+        self._Y = None
 
     def __len__(self):
-        return len(self.X)
+        return len(self.split_inds)
+
     def __getitem__(self, index):
-        processed = self.X[index]
-        return (processed, len(processed)), int(self.Y[index])
+        return self.wrapped_data[self.split_inds[index]]
+
+    @property
+    def X(self):
+        print('getting X')
+        if self._X is None:
+            self._X = itemgetter(*self.split_inds)(self.wrapped_data.X)
+        return self._X
+
+    @property
+    def Y(self):
+        if self._Y is None:
+            self._Y = np.array(itemgetter(*self.split_inds)(self.wrapped_data.Y))
+        return self._Y
 
 def split_ds(ds, split=[.8,.2,.0], shuffle=True):
     """randomly split a dataset into train/val/test given a percentage of how much to allocate to training"""
@@ -318,7 +336,8 @@ class unsupervised_dataset(data.Dataset):
         # self.path = path
         self.persist_state = persist_state
         # self.lazy = lazy
-        if isinstance(ds, lazy_array_loader):
+        if isinstance(ds, lazy_array_loader) or (isinstance(ds, train_val_test_wrapper) and ds.is_lazy):
+            print('doing the thing')
             self.all_strs = ds
             self.str_ends = ds.ends
         else:
@@ -351,6 +370,7 @@ class unsupervised_dataset(data.Dataset):
         Concatenates srings together into sequences of seq_len.
         Gets the index'th such concatenated sequence.
         """
+        start = time.time()
         #search for what string corresponds to the start of a sequence index
         str_ind = self.binary_search_strings(index)%self.num_strs
         #find what index to start from in start string
@@ -394,7 +414,8 @@ class unsupervised_dataset(data.Dataset):
         rtn = ''.join(rtn_strings)
         rtn_mask = [bit for mask in rtn_masks for bit in mask]
         masklen = len(rtn_mask)
-        rtn_mask += [1]*max((masklen-len(rtn)),0)
+        rtn_mask += [1]*max((masklen-len(rtn)), 0)
+        print(index, time.time()-start)
 
         return (rtn, np.array(rtn_mask))
 

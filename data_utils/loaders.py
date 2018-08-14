@@ -57,6 +57,7 @@ def default_collate(batch, maxlen=None, process=False):
     elif isinstance(batch[0], float):
         return torch.DoubleTensor(batch)
     elif isinstance(batch[0], string_classes):
+        print('tokenizing')
         return tokenize_str_batch(batch, rtn_maxlen=None, process=process, maxlen=maxlen)
     elif isinstance(batch[0], collections.Mapping):
         return {key: default_collate([d[key] for d in batch]) for key in batch[0]}
