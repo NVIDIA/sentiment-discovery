@@ -98,7 +98,7 @@ def classify(model, text):
                 labels = []
             labels.append(probs[:,-1].data.cpu().numpy())
 
-            num_char = length_batch.sum().data[0]
+            num_char = float(length_batch.sum().data.cpu()[0])
 
             end = time.time()
             elapsed_time = end - start
@@ -107,8 +107,8 @@ def classify(model, text):
 
             s_per_batch = total_time / (i+1)
             timeleft = (len_ds - (i+1)) * s_per_batch
-            ch_per_s = num_char / elapsed_time
-            print('batch {:5d}/{:5d} | ch/s {:.2E} | time {:.2E} | time left {:.2E}'.format(i, len_ds, ch_per_s, elapsed_time, timeleft))
+            ch_per_s = num_char / (elapsed_time)
+            print('batch {:5d}/{:5d} | ch/s {:.2E} | time {:.2E} | time left {:.2E}'.format(i+1, len_ds, ch_per_s, elapsed_time, timeleft))
 
     if not first_label:
         labels = (np.concatenate(labels).flatten())

@@ -144,7 +144,7 @@ def transform(model, text):
             labels.append(labels_batch.data.cpu().numpy())
             features.append(cell.data.cpu().numpy())
 
-            num_char = int(length_batch.sum().cpu().numpy())
+            num_char = float(length_batch.sum().cpu().numpy())
 
             end = time.time()
             elapsed_time = end - start
@@ -153,11 +153,8 @@ def transform(model, text):
 
             s_per_batch = total_time / (i+1)
             timeleft = (len_ds - (i+1)) * s_per_batch
-            if elapsed_time == 0:
-                ch_per_s = num_char
-            else:
-                ch_per_s = num_char / (elapsed_time+1e-8)
-            print('batch {:5d}/{:5d} | ch/s {:.2E} | time {:.2E} | time left {:.2E}'.format(i, len_ds, ch_per_s, elapsed_time, timeleft))
+            ch_per_s = num_char / elapsed_time
+            print('batch {:5d}/{:5d} | ch/s {:.2E} | time {:.2E} | time left {:.2E}'.format(i+1, len_ds, ch_per_s, elapsed_time, timeleft))
 
     if not first_feature:
         features = (np.concatenate(features))

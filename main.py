@@ -287,8 +287,6 @@ def train(total_iters=0, skipped_iters=0, elapsed_time=False):
                   )
         )
     for i, batch in enumerate(train_data):
-        print('got_batch')
-
         data, targets, reset_mask = get_batch(batch)
         optim.zero_grad()
         output, hidden = model(data, reset_mask=reset_mask)

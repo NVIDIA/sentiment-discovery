@@ -100,7 +100,6 @@ def _tokenize_str(string, char_tensor=None):
     If no char_tensor is provide one is created.
     Typically used internally by `tokenize_str_batch`.
     """
-    print('in tokenizer')
     if char_tensor is None:
         char_tensor = torch.ByteTensor(len(string.encode()))
     for i, char in enumerate(string):

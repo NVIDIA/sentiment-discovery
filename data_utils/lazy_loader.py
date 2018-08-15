@@ -31,13 +31,14 @@ def make_lazy(path, strs, data_type='data'):
     lenpath = os.path.join(lazypath, data_type+'.len.pkl')
     if not torch.distributed._initialized or torch.distributed.get_rank() == 0:
         with open(datapath, 'wb') as f:
-            str_ends = []
+            str_lens = []
             str_cnt = 0
             for s in strs:
-                f.write(s.encode('utf-8'))
-                str_cnt += len(s)
-                str_ends.append(str_cnt)
-        pkl.dump(str_ends, open(lenpath, 'wb'))
+                encoded = s.encode('utf-8')
+                f.write(encoded)
+                str_cnt = len(encoded)
+                str_lens.append(str_cnt)
+        pkl.dump(str_lens, open(lenpath, 'wb'))
     else:
         while not os.path.exists(lenpath):
             time.sleep(1)
@@ -62,11 +63,12 @@ class lazy_array_loader(object):
         self.file = self._file
         #memory map file if necessary
         self.mem_map = mem_map
-        print('mmap', self.mem_map)
         if self.mem_map:
             self.file = mmap.mmap(self.file.fileno(), 0, prot=mmap.PROT_READ)
         lenpath = os.path.join(lazypath, data_type+'.len.pkl')
-        self.ends = pkl.load(open(lenpath, 'rb'))
+        self.lens = pkl.load(open(lenpath, 'rb'))
+        self.ends = list(accumulate(self.lens))
+        self.dumb_ends = list(self.ends)
         self.read_lock = Lock()
 
     def __getitem__(self, index):
@@ -95,7 +97,7 @@ class lazy_array_loader(object):
         """read specified portion of file"""
         #TODO: Solve race condition
         #Seek to start of file read
-        #self.read_lock.acquire()
+        self.read_lock.acquire()
         self.file.seek(start)
         ##### Getting context-switched here
         #read to end of file if no end point provided
@@ -104,7 +106,7 @@ class lazy_array_loader(object):
         #else read amount needed to reach end point
         else:
             rtn = self.file.read(end-start)
-        #self.read_lock.release()
+        self.read_lock.release()
         #TODO: @raulp figure out mem map byte string bug
         #if mem map'd need to decode byte string to string
         rtn = rtn.decode('utf-8')

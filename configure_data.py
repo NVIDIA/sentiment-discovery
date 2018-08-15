@@ -36,10 +36,9 @@ def make_loaders(opt):
                     'rank': opt.rank, 'world_size': opt.world_size, 'drop_last': opt.world_size > 1}
     split = get_split(opt)
     data_set_args = {
-        'path': opt.data, 'seq_length': seq_length, 'cache': opt.cache,
-        'text_key': opt.text_key, 'label_key': opt.label_key, 'lazy': opt.lazy,
-        'preprocess': opt.preprocess, 'persist_state': opt.persist_state,
-        'cache_size': opt.batch_size, 'delim': opt.delim, 'num_shards': opt.num_shards,
+        'path': opt.data, 'seq_length': seq_length, 'lazy': opt.lazy,
+        'text_key': opt.text_key, 'label_key': opt.label_key, 'preprocess': opt.preprocess,
+        'persist_state': opt.persist_state, 'delim': opt.delim, 'num_shards': opt.num_shards,
         'ds_type': opt.data_set_type, 'split': split, 'loose': opt.loose_json}
     eval_loader_args = copy.copy(data_loader_args)
     eval_set_args = copy.copy(data_set_args)
@@ -47,7 +46,6 @@ def make_loaders(opt):
     # if optional eval args were set then replace their equivalent values in the arg dict
     if opt.eval_batch_size != 0:
         eval_loader_args['batch_size'] = eval_batch_size
-        eval_set_args['cache_size'] = eval_batch_size
     if opt.eval_seq_length != 0:
         eval_set_args['seq_length'] = eval_seq_length
     if opt.eval_text_key != 'None':
@@ -151,7 +149,6 @@ def configure_data(parser):
                 'num_shards': 1002,
                 'val_shards': 0,
                 'test_shards': 0,
-                'cache': 0,
                 'persist_state': 0,
                 'lazy': False,
                 'shuffle': False,
