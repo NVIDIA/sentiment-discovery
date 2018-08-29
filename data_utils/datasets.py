@@ -136,9 +136,9 @@ class csv_dataset(data.Dataset):
 
  #       data = data.fillna(value=-1)
         try:
-            data = pd.read_csv(load_path, sep=delim, usecols=[text_key, label_key], encoding='latin-1')
+            data = pd.read_csv(load_path, sep=self.delim, usecols=[text_key, label_key], encoding='latin-1')
         except:
-            data = pd.read_csv(load_path, sep=delim, usecols=[text_key], encoding='latin-1')
+            data = pd.read_csv(load_path, sep=self.delim, usecols=[text_key], encoding='latin-1')
 
         data = data.dropna(axis=0)
 
