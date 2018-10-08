@@ -68,6 +68,8 @@ parser.add_argument('--distributed_backend', default='gloo',
                     help='which backend to use for distributed training. One of [gloo, nccl]')
 parser.add_argument('--rank', type=int, default=-1,
                     help='distributed worker rank. Typically set automatically from multiproc.py')
+parser.add_argument('--base-gpu', type=int, default=0,
+                    help='base gpu to use as gpu 0')
 parser.add_argument('--optim', default='Adam',
                     help='One of PyTorch\'s optimizers (Adam, SGD, etc). Default: Adam')
 parser.add_argument('--tcp-port', type=int, default=6000,
@@ -102,7 +104,7 @@ args.cuda = torch.cuda.is_available()
 
 # initialize distributed process group and set device
 if args.rank > 0:
-    torch.cuda.set_device(args.rank % torch.cuda.device_count())
+    torch.cuda.set_device((args.rank+args.base_gpu) % torch.cuda.device_count())
 
 if args.world_size > 1:
     distributed_init_file = os.path.splitext(args.save)[0]+'.distributed.dpt'
