@@ -103,7 +103,7 @@ torch.backends.cudnn.enabled = False
 args.cuda = torch.cuda.is_available()
 
 # initialize distributed process group and set device
-if args.rank > 0:
+if args.rank > 0 or args.base_gpu != 0:
     torch.cuda.set_device((args.rank+args.base_gpu) % torch.cuda.device_count())
 
 if args.world_size > 1:
