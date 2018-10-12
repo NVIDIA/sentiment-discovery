@@ -257,19 +257,6 @@ def evaluate(data_source):
             total_loss += loss.data[0]
     return total_loss / max(len(data_source), 1)
 
-class dummyloader(object):
-    def __init__(self, sample, num_iters=1000):
-        self.num_iters = num_iters
-        self.sample = sample
-
-    def __iter__(self):
-        for x in range(self.num_iters):
-            yield [s.detach() for s in self.sample]
-
-    def __len__(self):
-        return self.num_iters
-
-
 def train(total_iters=0, skipped_iters=0, elapsed_time=False):
     # Turn on training mode which enables dropout.
     model.train()
