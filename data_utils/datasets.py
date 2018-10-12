@@ -317,6 +317,56 @@ def get_shard_indices(num_strs, num_shards=1000):
     inds = list(np.arange(num_shards)*shard_size)
     return set(inds)
 
+class data_shard(object):
+    """
+    Args:
+        data (str or list): data comprising the data shard. Either a string or list of strings.
+        seq_len (int): sequence length to sample from shard
+        persist_state (int): one of -1,0,1 specifying whether to never reset state,
+            reset after every sentence, or at end of every shard. Default: 0
+    Attributes:
+        all_strs (list): all strings from data concatenated together
+        str_ends (list): cummulative lengths of `all_strs` if they were all concat'd to gether.
+            `itertools.accumulate([len(s) for s in all_strs])
+        total_chars (int): str_ends[-1]
+        num_strs (int): len(data)
+    """
+    def __init__(self, data, seq_len=-1, persist_state=0):
+        self.seq_len = seq_len
+        self.persist_state = persist_state
+
+        if isinstance(data, list):
+            self.num_strs = len(data)
+            self.all_strs = ''.join(data)
+            self.str_ends = list(accumulate(map(len, data)))
+        else:
+            self.num_strs = 1
+            self.all_strs = data
+            self.str_ends = [len(data)]
+        self.total_chars = self.str_ends[-1]
+        self.counter = 0
+
+    def set_seq_len(self, val):
+        self.seq_len=val
+
+    def get(self, seq_len):
+        if seq_len <= 0:
+            self.counter = self.total_chars
+            return self.all_strs
+        else:
+            rtn = self.all_strs[self.counter:self.counter+seq_len]
+            self.counter+=seq_len
+            return rtn 
+
+    def is_done(self):
+        return self.counter >= self.total_chars
+
+    def __iter__(self):
+        self.counter = 0
+        while self.counter < self.total_chars:
+            yield self.get(self.seq_len)
+
+            
 class unsupervised_dataset(data.Dataset):
     """
     class for loading dataset for unsupervised text reconstruction
