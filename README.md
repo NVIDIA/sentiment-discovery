@@ -13,7 +13,7 @@ The learned language model can be transferred to other natural language processi
 
 The model's performance as a whole will increase as it processes more data. However, as is discovered early on in the training process, transferring the model to sentiment classification via Logistic Regression with an L1 penalty leads to the emergence of one neuron (feature) that correlates strongly with sentiment.
 
-This sentiment neuron can be used to accurately and robustly discriminate between postive and negative sentiment given the single feature. A decision boundary of 0 is able to split the distribution of the neuron features into (relatively) distinct positive and negative sentiment clusters. 
+This sentiment neuron can be used to accurately and robustly discriminate between positive and negative sentiment given the single feature. A decision boundary of 0 is able to split the distribution of the neuron features into (relatively) distinct positive and negative sentiment clusters. 
 
 ![main neuron fig](./figures/highlighted_final_vals.png "Feature weights and Sentiment Logits")
 
@@ -145,7 +145,7 @@ python3 transfer.py --load_model <model>.pt --neurons 5                   #use 5
 python3 transfer.py --load_model <model>.pt --fp16                        #run model in fp16 for featurization step
 ```
 
-Expected output transfering fully trained models to sentiment classification for given size:
+Expected output transferring fully trained models to sentiment classification for given size:
 
 ![Sentiment Transfer Performance](./figures/sentiment_performance.png)
 
@@ -158,7 +158,7 @@ The basic functionality generates text up to a specified number of tokens given 
 python generate.py --load_model <path2classifier.pt>t --gen_length 1000      #generates 1000-token long text from a given model
 ```
 
-Beyond that, this script can also be used to analyze activation heatmaps of a particular sentiment neuron given a trained AND transfered language model.
+Beyond that, this script can also be used to analyze activation heatmaps of a particular sentiment neuron given a trained AND transferred language model.
 
 By default the maximally contributing neuron during past regression transfers is used to generate these heatmaps (as seen below)
 
