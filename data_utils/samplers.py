@@ -4,6 +4,8 @@ import torch
 from torch.utils import data
 import numpy as np
 
+from .datasets import data_shard
+
 class DistributedBatchSampler(data.sampler.BatchSampler):
     """
     similar to normal implementation of distributed batch sampler, except if sampler is transposed sampler
@@ -156,6 +158,103 @@ class TransposedSampler(data.sampler.Sampler):
     def __len__(self):
         #return self.len_ds
         return self.strat_width*self.batch_size
+
+class RandomShardSampler(object):
+
+    def __init__(self, data_source, samples_per_shard, seq_len=-1, persist_state=0, random=None):
+        self.data_source = data_source
+        self.source_size = len(data_source)
+        self.samples_per_shard = samples_per_shard
+        self.seq_len = seq_len
+        self.persist_state = persist_state
+        self.random = random
+        if self.random is None:
+            self.random = np.random
+
+    def set_seq_len(self, seq_len):
+        self.seq_len = seq_len
+
+    def set_samples_per_shard(self, samples_per_shard):
+        self.samples_per_shard = samples_per_shard
+
+    def set_persist_state(self, persist_state):
+        self.persist_state = persist_state
+
+    def get(self, random=None):
+        if random is None:
+            random = self.random
+        sample_ids = random.randint(self.source_size, size=self.samples_per_shards)
+        samples = [self.data_source[i] for i in sample_ids]
+        return data_shard(samples, self.seq_len, self.persist_state)
+
+
+class BatchShardSampler(object):
+    def __init__(self, shard_sampler, batch_size, drop_last, seq_len=-1, persist_state=0, random_batch=None):
+        self.shard_sampler = shard_sampler
+        self.batch_size = batch_size
+        self.drop_last = drop_last
+        self.batch = None
+        self.random_batch = random_batch
+        if self.random_batch is None:
+            self.random_batch = [np.random.RandomState(seed) for seed in np.random.randint(batch_size*999, size=batch_size)]
+
+    def set_seq_len(self, seq_len):
+        self.seq_len = seq_len
+        self.shard_sampler.set_seq_len(seq_len)
+        if self.batch is not None:
+            for shard_queue in self.batch:
+                for shard in shard_queue:
+                    shard.set_seq_len(seq_len)
+
+    def set_samples_per_shard(self, samples_per_shard):
+        self.samples_per_shard = samples_per_shard
+        self.shard_sampler.set_samples_per_shard(samples_per_shard)
+
+    def set_persist_state(self, persist_state):
+        self.persist_state = persist_state
+        self.shard_sampler.set_persist_state(persist_state)
+
+    def batch_zero(self):
+        self.batch = []
+        for b in range(self.batch_size):
+            self.batch.append([self.get_shard(b)])
+
+    def get_shard(self, b):
+        return self.shard_sampler.get(self.random_batch[b])
+
+    def is_batch_ready(self):
+        for shard_queue in self.batch:
+            if shard_queue[-1].is_done():
+                return False
+        return True
+
+    def update_batch(self):
+        for b, shard_queue in enumerate(self.batch):
+            if not shard_queue[-1].is_done():
+                continue
+            shard_queue
+
+    def check_and_prep_batch(self):
+        for b, shard_queue in enumerate(self.batch):
+            shard = None
+            queue_len = len(shard_queue)
+            while i < queue_len:
+                if shard_queue[i].is_done():
+                    shard_queue.pop(i)
+                    i -= 1
+                    queue_len -=1
+                elif shard_queue[i].is_last():
+                    shard_queue.append(self.get_shard(b))
+                    queue_len += 1
+                i += 1
+
+    def __iter__(self):
+        while True:
+            if self.batch is None:
+                self.batch_zero()
+            while not self.is_batch_ready():
+                self.update_batch()
+            yield self.batch
 
 # class ShardedSampler(data.sampler.Sampler):
 #     def __init__(self,data_source,batch_size,data_sampler=None,num_shards=1000):

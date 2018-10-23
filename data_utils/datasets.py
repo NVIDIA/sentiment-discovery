@@ -5,6 +5,7 @@ from bisect import bisect_left
 import json
 from itertools import accumulate
 import csv
+import collections
 
 import torch
 from torch.utils import data
@@ -335,10 +336,14 @@ class data_shard(object):
         self.seq_len = seq_len
         self.persist_state = persist_state
 
-        if isinstance(data, list):
+        if isinstance(data, list) and isinstance(data[0], collections.Iterable):
             self.num_strs = len(data)
-            self.all_strs = ''.join(data)
-            self.str_ends = list(accumulate(map(len, data)))
+            self.all_strs = data[0]
+            self.str_ends = [len(self.all_strs)]
+            for i in range(1, self.num_strs):
+                s = data[i]
+                self.all_strs += s
+                self.str_ends.append(len(s))
         else:
             self.num_strs = 1
             self.all_strs = data
@@ -358,6 +363,9 @@ class data_shard(object):
             self.counter+=seq_len
             return rtn 
 
+    def is_last(self):
+        return self.counter >= self.total_chars-self.seq_len
+        
     def is_done(self):
         return self.counter >= self.total_chars
 
@@ -366,7 +374,6 @@ class data_shard(object):
         while self.counter < self.total_chars:
             yield self.get(self.seq_len)
 
-            
 class unsupervised_dataset(data.Dataset):
     """
     class for loading dataset for unsupervised text reconstruction

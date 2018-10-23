@@ -14,7 +14,7 @@ from torch.utils import data
 import torch.multiprocessing as multiprocessing
 
 from .preprocess import tokenize_str_batch
-from .samplers import DistributedBatchSampler, BatchSampler, TransposedSampler
+from .samplers import DistributedBatchSampler, BatchSampler, TransposedSampler, RandomShardSampler
 
 _use_shared_memory = False
 """Whether to use shared memory in default_collate"""
@@ -115,3 +115,54 @@ class DataLoader(data.DataLoader):
         self.batch_sampler = batch_sampler
         self.last_iter = None
 
+class ShardLoader(object):
+    def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None, batch_sampler=None,
+                 num_workers=0, collate_fn=default_collate, pin_memory=False, drop_last=False,
+                 transpose=False, world_size=2, rank=-1, distributed=False, wrap_last=False,
+                 timeout=0, worker_init_fn=None, seq_len=-1, persist_state=0, samples_per_shard=1):
+        self.dataset = dataset
+        self.batch_size = batch_size
+        self.seq_len = seq_len
+        self.persist_state = persist_state
+        self.samples_per_shard = samples_per_shard
+        self.num_workers = num_workers
+        self.collate_fn = collate_fn
+        self.pin_memory = pin_memory
+        self.drop_last = drop_last
+        self.timeout = timeout
+        self.worker_init_fn = worker_init_fn
+        if timeout < 0:
+            raise ValueError('timeout option should be non-negative')
+
+        if batch_sampler is not None:
+            if batch_size > 1 or shuffle or sampler is not None or drop_last:
+                raise ValueError('batch_sampler is mutually exclusive with \
+                                    batch_size, shuffle, sampler, and drop_last')
+
+        if sampler is not None and shuffle:
+            raise ValueError('sampler is mutually exclusive with shuffle')
+
+        if self.num_workers < 0:
+            raise ValueError('num_workers cannot be negative; '
+                             'use num_workers=0 to disable multiprocessing.')
+
+        self.sampler = RandomShardSampler(self.dataset, self.samples_per_shard, self.seq_len, self.persist_state)
+
+        self.distributed=distributed
+        self.world_size=world_size
+        self.rank=rank
+        if self.distributed:
+            self.batch_size/=self.world_size
+
+
+    def set_seq_len(self, seq_len):
+        self.seq_len = seq_len
+        self.sampler.set_seq_len(seq_len)
+
+    def set_samples_per_shard(self, samples_per_shard):
+        self.samples_per_shard = samples_per_shard
+        self.sampler.set_samples_per_shard(samples_per_shard)
+
+    def set_persist_state(self, persist_state):
+        self.persist_state = persist_state
+        self.sampler.set_persist_state(persist_state)
