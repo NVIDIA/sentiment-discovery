@@ -159,6 +159,7 @@ class TransposedSampler(data.sampler.Sampler):
         #return self.len_ds
         return self.strat_width*self.batch_size
 
+
 class RandomShardSampler(object):
 
     def __init__(self, data_source, samples_per_shard, seq_len=-1, persist_state=0, random=None):
@@ -183,13 +184,17 @@ class RandomShardSampler(object):
     def get(self, random=None):
         if random is None:
             random = self.random
-        sample_ids = random.randint(self.source_size, size=self.samples_per_shards)
+        sample_ids = random.randint(self.source_size, size=self.samples_per_shard)
         samples = [self.data_source[i] for i in sample_ids]
+        samples = [sample['text'] if isinstance(sample, dict) else sample for sample in samples]
         return data_shard(samples, self.seq_len, self.persist_state)
+
+    def __len__(self):
+        return self.source_size
 
 
 class BatchShardSampler(object):
-    def __init__(self, shard_sampler, batch_size, drop_last, seq_len=-1, persist_state=0, random_batch=None):
+    def __init__(self, shard_sampler, batch_size, drop_last, random_batch=None):
         self.shard_sampler = shard_sampler
         self.batch_size = batch_size
         self.drop_last = drop_last
@@ -238,23 +243,47 @@ class BatchShardSampler(object):
         for b, shard_queue in enumerate(self.batch):
             shard = None
             queue_len = len(shard_queue)
+            i = 0
             while i < queue_len:
                 if shard_queue[i].is_done():
                     shard_queue.pop(i)
                     i -= 1
                     queue_len -=1
+
                 elif shard_queue[i].is_last():
                     shard_queue.append(self.get_shard(b))
                     queue_len += 1
                 i += 1
 
+    def get_batch(self):
+        if self.batch is None:
+            self.batch_zero()
+        self.check_and_prep_batch()
+        return [shard_queue[0] for shard_queue in self.batch]
+
     def __iter__(self):
         while True:
-            if self.batch is None:
-                self.batch_zero()
-            while not self.is_batch_ready():
-                self.update_batch()
-            yield self.batch
+            yield self.get_batch()
+
+    def __len__(self):
+        if self.drop_last:
+            return len(self.shard_sampler) // self.batch_size
+        else:
+            return (len(self.shard_sampler) + self.batch_size - 1) // self.batch_size
+
+class DistributedBatchShardSampler(BatchShardSampler):
+    def __init__(self, shard_sampler, local_batch_size, drop_last, random_batch=None, world_size=1, rank=0):
+        self.global_batch_size = int(local_batch_size*world_size)
+        if random_batch is None:
+            random_batch = [np.random.RandomState(seed) for seed in np.random.randint(self.global_batch_size*999, size=self.global_batch_size)]
+            random_batch = random_batch[local_batch_size*rank:local_batch_size*(rank+1)]
+        super(DistributedBatchShardSampler, self).__init__(shard_sampler, local_batch_size, drop_last, random_batch)
+
+    def __len__(self):
+        if self.drop_last:
+            return len(self.sampler) // self.global_batch_size
+        else:
+            return (len(self.sampler) + self.global_batch_size - 1) // self.global_batch_size
 
 # class ShardedSampler(data.sampler.Sampler):
 #     def __init__(self,data_source,batch_size,data_sampler=None,num_shards=1000):

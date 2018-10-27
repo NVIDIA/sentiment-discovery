@@ -75,13 +75,19 @@ def classify(model, text):
     first_label = True
 
     def get_batch(batch):
-        (text, timesteps), labels = batch
-        text = Variable(text).long()
+        '''
+        Process batch and return tuple of (text, text label, text length) long tensors.
+        Text is returned in column format with (time, batch) dimensions.
+        '''
+        text = batch['text']
+        timesteps = batch['length']
+        labels = batch['label']
+        text = Variable(text[0]).long()
         timesteps = Variable(timesteps).long()
         labels = Variable(labels).long()
         if args.cuda:
             text, timesteps, labels = text.cuda(), timesteps.cuda(), labels.cuda()
-        return text.t(), labels, timesteps
+        return text.t(), labels, timesteps-1
 
     tstart = start = time.time()
     n = 0

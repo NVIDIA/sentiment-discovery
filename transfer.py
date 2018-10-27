@@ -115,8 +115,10 @@ def transform(model, text):
         Process batch and return tuple of (text, text label, text length) long tensors.
         Text is returned in column format with (time, batch) dimensions.
         '''
-        (text, timesteps), labels = batch
-        text = Variable(text).long()
+        text = batch['text']
+        timesteps = batch['length']
+        labels = batch['label']
+        text = Variable(text[0]).long()
         timesteps = Variable(timesteps).long()
         labels = Variable(labels).long()
         if args.cuda:

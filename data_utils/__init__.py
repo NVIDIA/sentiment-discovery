@@ -1,11 +1,12 @@
 import os
 import math
 
-from .samplers import BatchSampler, DistributedBatchSampler, TransposedSampler
-from .loaders import DataLoader
+from .samplers import BatchSampler, DistributedBatchSampler, TransposedSampler, RandomShardSampler, BatchShardSampler, DistributedBatchShardSampler
+from .loaders import DataLoader, ShardLoader
 from .preprocess import tokenize_str_batch, binarize_labels
 from .datasets import unsupervised_dataset, json_dataset, csv_dataset, split_ds, get_processed_path
 from .lazy_loader import exists_lazy, make_lazy, lazy_array_loader
+from .tokenization import Tokenization, CommandToken, Tokenizer, CharacterLevelTokenizer
 
 TRAIN_DATA = 0
 VAL_DATA = 1
@@ -44,12 +45,15 @@ def get_dataset(path, **kwargs):
 def handle(path, text_key, label_key, preprocess=False, split=[1.], loose=False,
                 binarize_sent=False, delim=',', drop_unlabeled=False, lazy=False):
     """gets a dataset and handles splitting it into train/val/test if necessary"""
-    text = get_dataset(path, preprocess=preprocess, text_key=text_key, label_key=label_key,
+    tokenizer = None
+    if not lazy:
+        tokenizer = CharacterLevelTokenizer()
+    text = get_dataset(path, text_key=text_key, label_key=label_key, tokenizer=tokenizer,
                 binarize_sent=binarize_sent, delim=delim, drop_unlabeled=drop_unlabeled, loose_json=loose)
     if lazy:
-        if not exists_lazy(text.processed_path, data_type='data'):
-            make_lazy(text.processed_path, text.X, data_type='data')
-        text = lazy_array_loader(text.processed_path, data_type='data')
+        if not exists_lazy(text.path, data_type='data'):
+            make_lazy(text.path, text.X, data_type='data')
+        text = lazy_array_loader(text.path, data_type='data', map_fn=CharacterLevelTokenizer())
     if should_split(split):
         return split_ds(text, split)
     return text
@@ -57,9 +61,9 @@ def handle(path, text_key, label_key, preprocess=False, split=[1.], loose=False,
 
 def post_process_ds(ds, seq_length, ds_type='supervised', shard_split=1., num_shards=1002, persist_state=0):
     """add caching on top of dataset. Add unsupervised wrapper last"""
-    if ds_type == 'unsupervised':
-        shards = math.ceil(shard_split*num_shards)
-        ds = unsupervised_dataset(ds, seq_length, persist_state=persist_state, num_shards=shards)
+    # if ds_type == 'unsupervised':
+    #     shards = math.ceil(shard_split*num_shards)
+    #     ds = unsupervised_dataset(ds, seq_length, persist_state=persist_state, num_shards=shards)
     return ds
 
 def make_dataset(path, seq_length, text_key, label_key, lazy=False, preprocess=False, split=[1.],

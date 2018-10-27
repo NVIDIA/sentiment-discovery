@@ -49,6 +49,7 @@ def process_str(text, front_pad='\n ', end_pad=' ', maxlen=None, clean_markup=Tr
 
     if encode is not None:
         text = text.encode(encoding=encode)
+        text = text.decode(encoding=encode)
 
     return text
 
@@ -68,7 +69,7 @@ def remove_repeats(string, n, join=True):
         return "".join(output)
     return output
 
-def tokenize_str_batch(strings, rtn_maxlen=True, process=True, maxlen=None):
+def tokenize_str_batch(strings, rtn_maxlen=True, process=True, maxlen=None, ids=False, rtn_processed=True):
     """
     Tokenizes a list of strings into a ByteTensor
     Args:
@@ -82,27 +83,43 @@ def tokenize_str_batch(strings, rtn_maxlen=True, process=True, maxlen=None):
     if process:
         processed_strings = [process_str(x, maxlen=maxlen) for x in strings]
     else:
-        processed_strings = [x.encode('ascii', 'ignore') for x in strings]
-    lens = list(map(len, processed_strings))
-    maxlen = max(lens)
-    batch_tensor = torch.ByteTensor(len(lens), maxlen)
-    for i, string in enumerate(processed_strings):
-        _tokenize_str(string, batch_tensor[i])
-    if not rtn_maxlen and rtn_maxlen is not None:
-        return batch_tensor, lens
-    if rtn_maxlen is None:
-        return batch_tensor
-    return batch_tensor, maxlen
+        processed_strings = [x.encode('utf-8', 'replace') for x in strings]
 
-def _tokenize_str(string, char_tensor=None):
+    tensor_type = torch.ByteTensor
+
+    lens, batch_tensor = batch_tokens(processed_strings, tensor_type)
+    maxlen = max(lens)
+    rounded_maxlen = max(lens)
+
+    rtn = []
+    if not rtn_maxlen and rtn_maxlen is not None:
+        rtn = [batch_tensor, lens]
+    elif rtn_maxlen is None:
+        rtn = [batch_tensor]
+    else:
+        rtn = [batch_tensor, rounded_maxlen]
+    if rtn_processed:
+        rtn += [processed_strings]
+    return tuple(rtn)
+
+def batch_tokens(token_lists, tensor_type=torch.LongTensor, fill_value=0):
+    lens = list(map(len, token_lists))
+    batch_tensor = fill_value * torch.ones(len(lens), max(lens)).type(tensor_type)
+    for i, string in enumerate(token_lists):
+        _tokenize_str(string, tensor_type, batch_tensor[i])
+    return batch_tensor, lens
+
+def _tokenize_str(data, tensor_type, char_tensor=None):
     """
     Parses a utf-8 encoded string and assigns to ByteTensor char_tensor.
     If no char_tensor is provide one is created.
     Typically used internally by `tokenize_str_batch`.
     """
     if char_tensor is None:
-        char_tensor = torch.ByteTensor(len(string.encode()))
-    for i, char in enumerate(string):
+        if isinstance(data, str):
+            # data could either be a string or a list of ids.
+            data = data.encode()
+        char_tensor = tensor_type(len(data))
+    for i, char in enumerate(data):
         char_tensor[i] = char
-    return char_tensor
 

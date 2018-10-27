@@ -55,7 +55,7 @@ class lazy_array_loader(object):
         data_type: one of 'train', 'val', 'test'
         mem_map: boolean specifying whether to memory map file `path`
     """
-    def __init__(self, path, data_type='data', mem_map=False):
+    def __init__(self, path, data_type='data', mem_map=False, map_fn=None):
         lazypath = get_lazy_path(path)
         datapath = os.path.join(lazypath, data_type)
         #get file where array entries are concatenated into one big string
@@ -70,6 +70,7 @@ class lazy_array_loader(object):
         self.ends = list(accumulate(self.lens))
         self.dumb_ends = list(self.ends)
         self.read_lock = Lock()
+        self.map_fn = map_fn
 
     def __getitem__(self, index):
         """read file and splice strings based on string ending array `ends` """
@@ -79,7 +80,9 @@ class lazy_array_loader(object):
             else:
                 start = self.ends[index-1]
             end = self.ends[index]
-            return self.file_read(start, end)
+            rtn = self.file_read(start, end)
+            if self.map_fn is not None:
+                return self.map_fn(rtn)
         else:
             chr_lens = self.ends[index]
             if index.start == 0 or index.start is None:
@@ -88,7 +91,10 @@ class lazy_array_loader(object):
                 start = self.ends[index.start-1]
             stop = chr_lens[-1]
             strings = self.file_read(start, stop)
-            return split_strings(strings, start, chr_lens)
+            rtn = split_strings(strings, start, chr_lens)
+            if self.map_fn is not None:
+                return self.map_fn([s for s in rtn])
+        return rtn
 
     def __len__(self):
         return len(self.ends)

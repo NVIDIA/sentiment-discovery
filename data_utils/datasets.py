@@ -15,7 +15,7 @@ import numpy as np
 from .preprocess import process_str, binarize_labels
 from .lazy_loader import lazy_array_loader, exists_lazy, make_lazy
 from .cache import array_cache
-
+from .tokenization import Tokenization
 
 PERSIST_ALL = -1
 PERSIST_SHARD = 1
@@ -109,10 +109,11 @@ class csv_dataset(data.Dataset):
         X (list): all strings from the csv file
         Y (np.ndarray): labels to train against
     """
-    def __init__(self, path, preprocess=False, preprocess_fn=process_str, delim=',',
+    def __init__(self, path, tokenizer=None, preprocess_fn=None, delim=',',
                 binarize_sent=False, drop_unlabeled=False, text_key='sentence', label_key='label',
                 **kwargs):
-        self.processed_path = self.path = path
+        self.preprocess_fn = preprocess_fn
+        self.tokenizer = tokenizer
         self.path = path
         self.delim = delim
         self.text_key = text_key
@@ -122,8 +123,6 @@ class csv_dataset(data.Dataset):
         if '.tsv' in self.path:
             self.delim = '\t'
 
-        load_path, should_process = get_load_path_and_should_process(self.path, text_key, label_key)
-        should_process = should_process or preprocess
 
         self.X = []
         self.Y = []
@@ -137,24 +136,17 @@ class csv_dataset(data.Dataset):
 
  #       data = data.fillna(value=-1)
         try:
-            data = pd.read_csv(load_path, sep=self.delim, usecols=[text_key, label_key], encoding='latin-1')
+            data = pd.read_csv(self.path, sep=self.delim, usecols=[text_key, label_key], encoding='latin-1')
         except:
-            data = pd.read_csv(load_path, sep=self.delim, usecols=[text_key], encoding='latin-1')
+            data = pd.read_csv(self.path, sep=self.delim, usecols=[text_key], encoding='latin-1')
 
         data = data.dropna(axis=0)
 
         self.X = data[text_key].values.tolist()
-        if should_process:
-            self.X = [preprocess_fn(s, maxlen=None, encode=None) for s in self.X]
         if label_key in data:
             self.Y = data[label_key].values
         else:
             self.Y = np.ones(len(self.X))*-1
-
-        if should_process:
-            self.processed_path = save_preprocessed(self, text_key=text_key, label_key=label_key)
-        else:
-            self.processed_path = load_path
 
         if binarize_sent:
             self.Y = binarize_labels(self.Y, hard=binarize_sent)
@@ -165,8 +157,10 @@ class csv_dataset(data.Dataset):
     def __getitem__(self, index):
         """process string and return string,label,and stringlen"""
         x = self.X[index]
+        if self.tokenizer is not None:
+            x = self.tokenizer.EncodeAsIds(x, self.preprocess_fn)
         y = self.Y[index]
-        return (x, len(x)), int(y)
+        return {'text': x, 'length': len(x), 'label': y}
 
     def write(self, writer_gen=None, path=None, skip_header=False):
         """
@@ -205,31 +199,22 @@ class json_dataset(data.Dataset):
         all_strs (list): list of all strings from the dataset
         all_labels (list): list of all labels from the dataset (if they have it)
     """
-    def __init__(self, path, preprocess=False, preprocess_fn=process_str, binarize_sent=False,
+    def __init__(self, path, tokenizer=None, preprocess_fn=process_str, binarize_sent=False,
                 text_key='sentence', label_key='label', loose_json=False, **kwargs):
-        self.processed_path = self.path = path
         self.preprocess_fn = preprocess_fn
+        self.path = path
+        self.tokenizer = tokenizer
         self.X = []
         self.Y = []
         self.text_key = text_key
         self.label_key = label_key
         self.loose_json = loose_json
 
-        load_path, should_process = get_load_path_and_should_process(self.path, text_key, label_key)
-        should_process = should_process or preprocess
 
-        for j in self.load_json_stream(load_path):
+        for j in self.load_json_stream(self.path):
             s = j[text_key]
-            if should_process:
-                s = self.preprocess_fn(s, maxlen=None, encode=None)
-                j[text_key] = s
             self.X.append(s)
             self.Y.append(j[label_key])
-
-        if should_process:
-            self.processed_path = save_preprocessed(self, text_key=text_key, label_key=label_key)
-        else:
-            self.processed_path = load_path
 
         if binarize_sent:
             self.Y = binarize_labels(self.Y, hard=binarize_sent)
@@ -237,8 +222,10 @@ class json_dataset(data.Dataset):
     def __getitem__(self, index):
         """gets the index'th string from the dataset"""
         x = self.X[index]
+        if self.tokenizer is not None:
+            x = self.tokenizer.EncodeAsIds(x, self.preprocess_fn)
         y = self.Y[index]
-        return (self.X[index], len(x)), y
+        return {'text': x, 'length': len(x), 'label': y}
 
     def __len__(self):
         return len(self.X)
@@ -321,7 +308,7 @@ def get_shard_indices(num_strs, num_shards=1000):
 class data_shard(object):
     """
     Args:
-        data (str or list): data comprising the data shard. Either a string or list of strings.
+        data (Tokenization or list): data comprising the data shard. Either a Tokenization or list of Tokenizations.
         seq_len (int): sequence length to sample from shard
         persist_state (int): one of -1,0,1 specifying whether to never reset state,
             reset after every sentence, or at end of every shard. Default: 0
@@ -336,38 +323,86 @@ class data_shard(object):
         self.seq_len = seq_len
         self.persist_state = persist_state
 
-        if isinstance(data, list) and isinstance(data[0], collections.Iterable):
-            self.num_strs = len(data)
-            self.all_strs = data[0]
-            self.str_ends = [len(self.all_strs)]
-            for i in range(1, self.num_strs):
-                s = data[i]
-                self.all_strs += s
-                self.str_ends.append(len(s))
+        if isinstance(data, Tokenization):
+            self.num_seq = 1
+            self.all_seq = [data]
+            self.seq_ends = [len(data)]
         else:
-            self.num_strs = 1
-            self.all_strs = data
-            self.str_ends = [len(data)]
-        self.total_chars = self.str_ends[-1]
+            self.num_seq = len(data)
+            self.all_seq = data
+            self.seq_ends = [len(self.all_seq[0])]
+            for i in range(1, self.num_seq):
+                s = self.all_seq[i]
+                self.seq_ends.append(len(s)+self.seq_ends[-1])
+
+        self.pad = self.all_seq[-1].pad
+        self.total_chars = self.seq_ends[-1]
         self.counter = 0
+        self.seq_counter = 0
+        self.intra_seq_counter = 0
 
     def set_seq_len(self, val):
-        self.seq_len=val
+        self.seq_len = val
 
-    def get(self, seq_len):
+    def _get(self, seq_len):
+        rtn_mask = []
+        rtn = []
         if seq_len <= 0:
             self.counter = self.total_chars
-            return self.all_strs
+            rtn = []
+            for seq in self.all_seq:
+                s = seq[:]
+                rtn.extend(s)
+                rtn_mask.extend(self.get_string_mask(s))
+                self.seq_counter += 1
         else:
-            rtn = self.all_strs[self.counter:self.counter+seq_len]
-            self.counter+=seq_len
-            return rtn 
+            rtn = []
+            while self.seq_counter < self.num_seq and not len(rtn) >= seq_len:
+                tokenization = self.all_seq[self.seq_counter]
+                num_chars = seq_len - len(rtn)
+                seq = list(tokenization[self.intra_seq_counter:self.intra_seq_counter+num_chars])
+                rtn_mask.extend(self.get_string_mask(seq))
+                self.intra_seq_counter += len(seq)
+                if self.intra_seq_counter >= len(tokenization):
+                    self.seq_counter += 1
+                    self.intra_seq_counter = 0
+                rtn.extend(seq)
+        return rtn, rtn_mask
+
+    def get_string_mask(self, s):
+        start_mask = 0
+        if self.persist_state == PERSIST_SHARD:
+            start_mask = (self.seq_counter == 0 and self.intra_seq_counter == 0)
+        elif self.persist_state == RESET_STATE:
+            start_mask = self.intra_seq_counter == 0
+        return [start_mask] + [0] * (len(s)-1)
+
+
+    def get(self, seq_len=None):
+        if seq_len is None:
+            seq_len = self.seq_len
+        rtn, rtn_mask = self._get(seq_len)
+        rtn_len = len(rtn)
+        num_padding = seq_len-rtn_len
+        if num_padding > 0:
+            rtn.extend([self.pad] * num_padding)
+            rtn_mask.extend([0] * num_padding)
+        if seq_len > 0:
+            self.counter += seq_len
+            padding_mask = [1]*rtn_len + [0]*num_padding
+        else:
+            padding_mask = [1]*rtn_len
+        return np.array(rtn), np.array(rtn_mask), np.array(padding_mask)
 
     def is_last(self):
         return self.counter >= self.total_chars-self.seq_len
         
     def is_done(self):
         return self.counter >= self.total_chars
+
+    def binary_search_strings(self, sequence_index):
+        """binary search string endings to find which string corresponds to a specific sequence index"""
+        return bisect_left(self.str_ends, sequence_index*self.seq_len)
 
     def __iter__(self):
         self.counter = 0

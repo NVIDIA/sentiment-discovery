@@ -34,11 +34,15 @@ def make_loaders(opt):
     data_loader_args = {'num_workers': 1, 'shuffle': opt.shuffle, 'batch_size': batch_size,
                     'pin_memory': True, 'transpose': opt.transpose, 'distributed': opt.world_size > 1,
                     'rank': opt.rank, 'world_size': opt.world_size, 'drop_last': opt.world_size > 1}
+    if opt.data_set_type == 'unsupervised':
+        loader_type = data_utils.ShardLoader
+        data_loader_args.update({'seq_len': seq_length, 'persist_state': opt.persist_state, 'samples_per_shard': opt.samples_per_shard})
+    else:
+        loader_type = data_utils.DataLoader
     split = get_split(opt)
     data_set_args = {
-        'path': opt.data, 'seq_length': seq_length, 'lazy': opt.lazy,
+        'path': opt.data, 'seq_length': seq_length, 'lazy': opt.lazy, 'delim': opt.delim,
         'text_key': opt.text_key, 'label_key': opt.label_key, 'preprocess': opt.preprocess,
-        'persist_state': opt.persist_state, 'delim': opt.delim, 'num_shards': opt.num_shards,
         'ds_type': opt.data_set_type, 'split': split, 'loose': opt.loose_json}
     eval_loader_args = copy.copy(data_loader_args)
     eval_set_args = copy.copy(data_set_args)
@@ -69,22 +73,23 @@ def make_loaders(opt):
         eval_set_args['path'] = opt.test
         test = data_utils.make_dataset(**eval_set_args)
 
+
     if train is not None and opt.batch_size > 0:
-        train = data_utils.DataLoader(train, **data_loader_args)
+        train = loader_type(train, **data_loader_args)
     if valid is not None:
         if opt.data_set_type == 'unsupervised':
             if opt.eval_seq_length != 0:
                 valid.set_seq_len(eval_seq_length)
             if opt.val_shards != 0:
                 valid.set_num_shards(opt.val_shards)
-        valid = data_utils.DataLoader(valid, **eval_loader_args)
+        valid = loader_type(valid, **eval_loader_args)
     if test is not None:
         if opt.data_set_type == 'unsupervised':
             if opt.eval_seq_length != 0:
                 test.set_seq_len(eval_seq_length)
             if opt.test_shards != 0:
                 test.set_num_shards(opt.test_shards)
-        test = data_utils.DataLoader(test, **eval_loader_args)
+        test = loader_type(test, **eval_loader_args)
     return train, valid, test
 
 def should_split(split):
@@ -156,5 +161,6 @@ def configure_data(parser):
                 'data_set_type': 'supervised',
                 'seq_length': 256,
                 'eval_seq_length': 256,
+                'samples_per_shard': 10
                }
     return DataConfig(main_parser, defaults=defaults), parser

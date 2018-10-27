@@ -95,7 +95,10 @@ data_parser.add_argument('--val_shards', type=int, default=0,
                          help="""number of shards for validation dataset if validation set is specified and not split from training""")
 data_parser.add_argument('--test_shards', type=int, default=0,
                          help="""number of shards for test dataset if test set is specified and not split from training""")
-
+data_parser.add_argument('--train-iters', type=int, default=1000,
+                        help="""number of iterations per epoch to run training for""")
+data_parser.add_argument('--eval-iters', type=int, default=100,
+                        help="""number of iterations per epoch to run validation/test for""")
 
 args = parser.parse_args()
 
@@ -195,7 +198,7 @@ if train_data is not None:
     if args.constant_decay:
         num_iters = args.constant_decay
     else:
-        num_iters = len(train_data) * args.epochs
+        num_iters = args.train_iters * args.epochs
 
     init_step = -1
     if args.load_optim:
@@ -239,14 +242,17 @@ def get_batch(data):
 def init_hidden(batch_size):
     return rnn_model.rnn.init_hidden(args.batch_size)
 
-def evaluate(data_source):
+def evaluate(data_source, max_iters):
     # Turn on evaluation mode which disables dropout.
     model.eval()
     init_hidden(args.batch_size)
     total_loss = 0
     ntokens = args.data_size
     with torch.no_grad():
-        for i, batch in enumerate(data_source):
+        data_iter = iter(data_source)
+        i = 0
+        while i < max_iters:
+            batch = next(data_iter)
             data, targets, reset_mask = get_batch(batch)
             output, hidden = model(data, reset_mask=reset_mask)
             output_flat = output.view(-1, ntokens).contiguous().float()
@@ -255,9 +261,10 @@ def evaluate(data_source):
                 torch.distributed.all_reduce(loss.data)
                 loss.data /= args.world_size
             total_loss += loss.data[0]
+            i += 1
     return total_loss / max(len(data_source), 1)
 
-def train(total_iters=0, skipped_iters=0, elapsed_time=False):
+def train(max_iters, total_iters=0, skipped_iters=0, elapsed_time=False):
     # Turn on training mode which enables dropout.
     model.train()
     total_loss = 0
@@ -267,7 +274,6 @@ def train(total_iters=0, skipped_iters=0, elapsed_time=False):
     hidden = init_hidden(args.batch_size)
     curr_loss = 0.
     distributed = isinstance(model, DDP)
-    max_iters = len(train_data)
     def log(epoch, i, lr, ms_iter, total_time, loss, scale):
         print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:.2E} | ms/batch {:.3E} | total time {:.3E}\
                   loss {:.2E} | ppl {:8.2f} | loss scale {:8.2f}'.format(
@@ -275,7 +281,10 @@ def train(total_iters=0, skipped_iters=0, elapsed_time=False):
                       ms_iter, total_time, loss, math.exp(min(loss, 20)), scale
                   )
         )
-    for i, batch in enumerate(train_data):
+    data_iter = iter(train_data)
+    i = 0
+    while i < max_iters:
+        batch = next(data_iter)
         data, targets, reset_mask = get_batch(batch)
         optim.zero_grad()
         output, hidden = model(data, reset_mask=reset_mask)
@@ -346,6 +355,7 @@ def train(total_iters=0, skipped_iters=0, elapsed_time=False):
             if args.cuda:
                 torch.cuda.synchronize()
         total_iters += 1
+        i += 1
     #final logging
     elapsed_iters = max_iters % args.log_interval
     if elapsed_iters == 0:
@@ -377,12 +387,12 @@ try:
         skipped_iters = optim_sd['skipped_iter']
     for epoch in range(1, args.epochs+1):
         epoch_start_time = time.time()
-        val_loss, skipped_iters = train(total_iters, skipped_iters, elapsed_time)
+        val_loss, skipped_iters = train(args.train_iters, total_iters, skipped_iters, elapsed_time)
         elapsed_time += time.time() - epoch_start_time
         total_iters += len(train_data)
         if val_data is not None:
             print('entering eval')
-            val_loss = evaluate(val_data)
+            val_loss = evaluate(val_data, args.eval_iters)
         print('-' * 89)
         print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
               'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
@@ -408,7 +418,7 @@ if not args.no_weight_norm and args.rank <= 0:
 
 if test_data is not None:
     # Run on test data.
-    test_loss = evaluate(test_data)
+    test_loss = evaluate(test_data, args.eval_iters)
     print('=' * 89)
     print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
         test_loss, math.exp(test_loss)))

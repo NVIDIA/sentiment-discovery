@@ -8,13 +8,17 @@ else:
     string_classes = (str, bytes)
 import threading
 import traceback
+import math
 
 import torch
 from torch.utils import data
 import torch.multiprocessing as multiprocessing
 
-from .preprocess import tokenize_str_batch
-from .samplers import DistributedBatchSampler, BatchSampler, TransposedSampler, RandomShardSampler
+import numpy as np
+
+from .preprocess import tokenize_str_batch, batch_tokens
+from .samplers import DistributedBatchSampler, BatchSampler, TransposedSampler, RandomShardSampler, DistributedBatchShardSampler, BatchShardSampler
+from .tokenization import Tokenization
 
 _use_shared_memory = False
 """Whether to use shared memory in default_collate"""
@@ -52,6 +56,10 @@ def default_collate(batch, maxlen=None, process=False):
         if elem.shape == ():
             py_type = float if elem.dtype.name.startswith('float') else int
             return numpy_type_map[elem.dtype.name](list(map(py_type, batch)))
+    elif isinstance(batch[0], Tokenization):
+        pad = batch[0].pad
+        tokenization, text, original_text = zip(*([(tokenization.tokenization, tokenization.text, tokenization.original_text) for tokenization in batch]))
+        return [batch_tokens(tokenization, fill_value=pad)[0], text, original_text]
     elif isinstance(batch[0], int):
         return torch.LongTensor(batch)
     elif isinstance(batch[0], float):
@@ -146,13 +154,25 @@ class ShardLoader(object):
             raise ValueError('num_workers cannot be negative; '
                              'use num_workers=0 to disable multiprocessing.')
 
-        self.sampler = RandomShardSampler(self.dataset, self.samples_per_shard, self.seq_len, self.persist_state)
-
         self.distributed=distributed
         self.world_size=world_size
         self.rank=rank
         if self.distributed:
-            self.batch_size/=self.world_size
+            self.batch_size = math.ceil(self.batch_size/self.world_size)
+
+        if batch_sampler is None:
+            if sampler is None:
+                sampler = RandomShardSampler(self.dataset, self.samples_per_shard, self.seq_len, self.persist_state)
+            if self.distributed:
+                batch_sampler = DistributedBatchShardSampler(sampler, self.batch_size, self.drop_last, world_size=self.world_size, rank=self.rank)
+            else:
+                batch_sampler = BatchShardSampler(sampler, self.batch_size, self.drop_last)
+        else:
+            sampler = batch_sampler.sampler 
+
+        self.sampler = sampler
+        self.batch_sampler = batch_sampler
+        self.last_iter = None
 
 
     def set_seq_len(self, seq_len):
@@ -166,3 +186,12 @@ class ShardLoader(object):
     def set_persist_state(self, persist_state):
         self.persist_state = persist_state
         self.sampler.set_persist_state(persist_state)
+
+    def __len__(self):
+        return len(self.batch_sampler)/self.batch_size
+
+    def __iter__(self):
+        while True:
+            batch = self.batch_sampler.get_batch()
+            batch = [b.get() for b in batch]
+            yield default_collate(batch)
