@@ -45,15 +45,16 @@ def get_dataset(path, **kwargs):
 def handle(path, text_key, label_key, preprocess=False, split=[1.], loose=False,
                 binarize_sent=False, delim=',', drop_unlabeled=False, lazy=False):
     """gets a dataset and handles splitting it into train/val/test if necessary"""
-    tokenizer = None
-    if not lazy:
-        tokenizer = CharacterLevelTokenizer()
-    text = get_dataset(path, text_key=text_key, label_key=label_key, tokenizer=tokenizer,
-                binarize_sent=binarize_sent, delim=delim, drop_unlabeled=drop_unlabeled, loose_json=loose)
+    tokenizer = CharacterLevelTokenizer()
     if lazy:
-        if not exists_lazy(text.path, data_type='data'):
-            make_lazy(text.path, text.X, data_type='data')
-        text = lazy_array_loader(text.path, data_type='data', map_fn=CharacterLevelTokenizer())
+        if not exists_lazy(path, data_type='data'):
+            text = get_dataset(path, text_key=text_key, label_key=label_key, binarize_sent=binarize_sent,
+                delim=delim, drop_unlabeled=drop_unlabeled, loose_json=loose)
+            make_lazy(path, text.X, data_type='data')
+        text = lazy_array_loader(path, data_type='data', map_fn=tokenizer)
+    else:
+        text = get_dataset(path, text_key=text_key, label_key=label_key, binarize_sent=binarize_sent,
+                delim=delim, drop_unlabeled=drop_unlabeled, loose_json=loose, tokenizer=tokenizer)
     if should_split(split):
         return split_ds(text, split)
     return text

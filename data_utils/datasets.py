@@ -210,11 +210,12 @@ class json_dataset(data.Dataset):
         self.label_key = label_key
         self.loose_json = loose_json
 
-
+        print('loading json')
         for j in self.load_json_stream(self.path):
             s = j[text_key]
             self.X.append(s)
             self.Y.append(j[label_key])
+        print('loaded json')
 
         if binarize_sent:
             self.Y = binarize_labels(self.Y, hard=binarize_sent)

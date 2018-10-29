@@ -301,7 +301,6 @@ def train(max_iters, total_iters=0, skipped_iters=0, elapsed_time=False):
             loss.data /= args.world_size
             model.allreduce_params()
 
-
         # clipping gradients helps prevent the exploding gradient problem in RNNs / LSTMs.
         if args.clip > 0:
             if not args.fp16:

@@ -52,6 +52,8 @@ def make_loaders(opt):
         eval_loader_args['batch_size'] = eval_batch_size
     if opt.eval_seq_length != 0:
         eval_set_args['seq_length'] = eval_seq_length
+        if opt.data_set_type == 'unsupervised':
+            eval_loader_args['seq_len'] = eval_seq_length
     if opt.eval_text_key != 'None':
         eval_set_args['text_key'] = opt.eval_text_key
     if opt.eval_label_key != 'None':
@@ -77,18 +79,18 @@ def make_loaders(opt):
     if train is not None and opt.batch_size > 0:
         train = loader_type(train, **data_loader_args)
     if valid is not None:
-        if opt.data_set_type == 'unsupervised':
-            if opt.eval_seq_length != 0:
-                valid.set_seq_len(eval_seq_length)
-            if opt.val_shards != 0:
-                valid.set_num_shards(opt.val_shards)
+        # if opt.data_set_type == 'unsupervised':
+        #     if opt.eval_seq_length != 0:
+        #         valid.set_seq_len(eval_seq_length)
+        #     if opt.val_shards != 0:
+        #         valid.set_num_shards(opt.val_shards)
         valid = loader_type(valid, **eval_loader_args)
     if test is not None:
-        if opt.data_set_type == 'unsupervised':
-            if opt.eval_seq_length != 0:
-                test.set_seq_len(eval_seq_length)
-            if opt.test_shards != 0:
-                test.set_num_shards(opt.test_shards)
+        # if opt.data_set_type == 'unsupervised':
+        #     if opt.eval_seq_length != 0:
+        #         test.set_seq_len(eval_seq_length)
+        #     if opt.test_shards != 0:
+        #         test.set_num_shards(opt.test_shards)
         test = loader_type(test, **eval_loader_args)
     return train, valid, test
 

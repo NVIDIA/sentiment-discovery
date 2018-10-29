@@ -34,6 +34,8 @@ def make_lazy(path, strs, data_type='data'):
             str_lens = []
             str_cnt = 0
             for s in strs:
+                if isinstance(s, dict):
+                    s = s['text']
                 encoded = s.encode('utf-8')
                 f.write(encoded)
                 str_cnt = len(encoded)
