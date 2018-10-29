@@ -1,7 +1,7 @@
 import os
 import time
 from operator import itemgetter
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 import json
 from itertools import accumulate
 import csv
@@ -38,7 +38,68 @@ def save_preprocessed(ds, text_key='text', label_key='label'):
         ds.write(path=processed_path)
     return processed_path
 
-class train_val_test_wrapper(data.Dataset):
+class ConcatDataset(Dataset):
+    """
+    Dataset to concatenate multiple datasets.
+    Purpose: useful to assemble different existing datasets, possibly
+    large-scale datasets as the concatenation operation is done in an
+    on-the-fly manner.
+    Arguments:
+        datasets (sequence): List of datasets to be concatenated
+    """
+
+    @staticmethod
+    def cumsum(sequence):
+        r, s = [], 0
+        for e in sequence:
+            l = len(e)
+            r.append(l + s)
+            s += l
+        return r
+
+    def __init__(self, datasets):
+        super(ConcatDataset, self).__init__()
+        assert len(datasets) > 0, 'datasets should not be an empty iterable'
+        self.datasets = list(datasets)
+        self.cumulative_sizes = self.cumsum(self.datasets)
+        self._X = None
+        self._Y = None
+
+    def __len__(self):
+        return self.cumulative_sizes[-1]
+
+    def __getitem__(self, idx):
+        dataset_idx = bisect_right(self.cumulative_sizes, idx)
+        if dataset_idx == 0:
+            sample_idx = idx
+        else:
+            sample_idx = idx - self.cumulative_sizes[dataset_idx - 1]
+        return self.datasets[dataset_idx][sample_idx]
+
+    @property
+    def X(self):
+        if self._X is None:
+            self._X = []
+            for data in self.datasets:
+                self._X.extend(data.X)
+        return self._X
+
+    @property
+    def Y(self):
+        if self._Y is None:
+            self._Y = []
+            for data in self.datasets:
+                self._Y.extend(list(data.Y))
+            self._Y = np.array(self._Y)
+        return self._Y
+
+    @property
+    def cummulative_sizes(self):
+        warnings.warn("cummulative_sizes attribute is renamed to "
+                      "cumulative_sizes", DeprecationWarning, stacklevel=2)
+        return self.cumulative_sizes
+
+class SplitDataset(data.Dataset):
     def __init__(self, ds, split_inds):
         self.split_inds = list(split_inds)
         self.wrapped_data = ds
@@ -87,7 +148,7 @@ def split_ds(ds, split=[.8,.2,.0], shuffle=True):
             residual_idx += proportion % 1
             split_ = int(int(proportion) + residual_idx)
             split_inds = inds[start_idx:start_idx+max(split_, 1)]
-            rtn_ds[i] = train_val_test_wrapper(ds, split_inds)
+            rtn_ds[i] = SplitDataset(ds, split_inds)
             start_idx += split_
             residual_idx %= 1
     return rtn_ds
@@ -358,16 +419,25 @@ class data_shard(object):
                 self.seq_counter += 1
         else:
             rtn = []
+            #add one to the sequence length because we need [0:seq_len] as inputs and [1:seq_len+1] as targets
+            seq_len += 1
             while self.seq_counter < self.num_seq and not len(rtn) >= seq_len:
                 tokenization = self.all_seq[self.seq_counter]
                 num_chars = seq_len - len(rtn)
-                seq = list(tokenization[self.intra_seq_counter:self.intra_seq_counter+num_chars])
-                rtn_mask.extend(self.get_string_mask(seq))
-                self.intra_seq_counter += len(seq)
-                if self.intra_seq_counter >= len(tokenization):
-                    self.seq_counter += 1
-                    self.intra_seq_counter = 0
+                start = self.intra_seq_counter
+                end = start + num_chars
+                seq = list(tokenization[start:end])
                 rtn.extend(seq)
+                rtn_mask.extend(self.get_string_mask(seq))
+                seq_complete = len(rtn) == seq_len
+                self.intra_seq_counter += len_seq
+                if self.intra_seq_counter >= len(tokenization):
+                    if seq_complete:
+                        # if sampled seq_len+1 tokens ends on the last token of an example do not advance intra_seq_counter as the last token will be needed for input during next sample
+                        self.intra_seq_counter -= 1
+                    else:
+                        self.seq_counter += 1
+                        self.intra_seq_counter = 0
         return rtn, rtn_mask
 
     def get_string_mask(self, s):
@@ -384,26 +454,25 @@ class data_shard(object):
             seq_len = self.seq_len
         rtn, rtn_mask = self._get(seq_len)
         rtn_len = len(rtn)
-        num_padding = seq_len-rtn_len
+        # returned sequence should be seq_len+1 length since it needs to contain inputs and targets
+        num_padding = seq_len - (rtn_len-1)
         if num_padding > 0:
             rtn.extend([self.pad] * num_padding)
             rtn_mask.extend([0] * num_padding)
         if seq_len > 0:
             self.counter += seq_len
-            padding_mask = [1]*rtn_len + [0]*num_padding
+            # mask all padding + the last valid target token to 0 since they won't be used in loss computation
+            loss_mask = [1]*(rtn_len-1) + [0]*(num_padding+1)
         else:
-            padding_mask = [1]*rtn_len
-        return np.array(rtn), np.array(rtn_mask), np.array(padding_mask)
+            self.counter = self.total_chars
+            loss_mask = [1]*rtn_len
+        return np.array(rtn), np.array(rtn_mask), np.array(loss_mask)
 
     def is_last(self):
-        return self.counter >= self.total_chars-self.seq_len
+        return self.counter >= self.total_chars-self.seq_len -1
         
     def is_done(self):
-        return self.counter >= self.total_chars
-
-    def binary_search_strings(self, sequence_index):
-        """binary search string endings to find which string corresponds to a specific sequence index"""
-        return bisect_left(self.str_ends, sequence_index*self.seq_len)
+        return self.counter >= self.total_chars-1
 
     def __iter__(self):
         self.counter = 0
