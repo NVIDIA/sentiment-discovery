@@ -38,7 +38,7 @@ def save_preprocessed(ds, text_key='text', label_key='label'):
         ds.write(path=processed_path)
     return processed_path
 
-class ConcatDataset(Dataset):
+class ConcatDataset(data.Dataset):
     """
     Dataset to concatenate multiple datasets.
     Purpose: useful to assemble different existing datasets, possibly
