@@ -40,7 +40,7 @@ parser.add_argument('--neurons', default=-1, type=int,
 
 data_config, data_parser = configure_data(parser)
 
-data_parser.set_defaults(split='1.', data='data/binary_sst/train.csv')
+data_parser.set_defaults(split='1.', data=['data/binary_sst/train.csv'])
 
 args = parser.parse_args()
 

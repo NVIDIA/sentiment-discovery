@@ -54,24 +54,24 @@ def make_loaders(opt):
         eval_set_args['seq_length'] = eval_seq_length
         if opt.data_set_type == 'unsupervised':
             eval_loader_args['seq_len'] = eval_seq_length
-    if opt.eval_text_key != 'None':
+    if opt.eval_text_key is not None:
         eval_set_args['text_key'] = opt.eval_text_key
-    if opt.eval_label_key != 'None':
+    if opt.eval_label_key is not None:
         eval_set_args['label_key'] = opt.eval_label_key
 
     train = None
     valid = None
     test = None
 
-    if opt.data != 'None':
+    if opt.data is not None:
         train = data_utils.make_dataset(**data_set_args)
         if should_split(split):
             train, valid, test = train
 
-    if opt.valid != 'None':
+    if opt.valid is not None:
         eval_set_args['path'] = opt.valid
         valid = data_utils.make_dataset(**eval_set_args)
-    if test is None and opt.test != 'None':
+    if test is None and opt.test is not None:
         eval_set_args['path'] = opt.test
         test = data_utils.make_dataset(**eval_set_args)
 
@@ -111,9 +111,9 @@ def get_split(opt):
     while len(splits) < 3:
         splits.append(0.)
     splits = splits[:3]
-    if opt.valid != 'None':
+    if opt.valid is not None:
         splits[1] = 0.
-    if opt.test != 'None':
+    if opt.test is not None:
         splits[2] = 0.
     final_sum = sum(splits)
     return [s/final_sum for s in splits]
@@ -122,11 +122,11 @@ def configure_data(parser):
     """add cmdline flags for configuring datasets"""
     main_parser = parser
     parser = parser.add_argument_group('data options')
-    parser.add_argument('--data', default='./data/imdb/unsup.json',
+    parser.add_argument('--data', nargs='+', default=['./data/imdb/unsup.json'],
                         help="""Filename for training""")
-    parser.add_argument('--valid', default='None',
+    parser.add_argument('--valid', nargs='*', default=None,
                         help="""Filename for validation""")
-    parser.add_argument('--test', default='None',
+    parser.add_argument('--test', nargs='*', default=None,
                         help="""Filename for testing""")
     parser.add_argument('--batch_size', type=int, default=128,
                         help='Data Loader batch size')
@@ -146,9 +146,9 @@ def configure_data(parser):
                         help='key to use to extract text from json/csv')
     parser.add_argument('--label_key', default='label',
                         help='key to use to extract labels from json/csv')
-    parser.add_argument('--eval_text_key', default='None',
+    parser.add_argument('--eval_text_key', default=None,
                         help='key to use to extract text from json/csv evaluation datasets')
-    parser.add_argument('--eval_label_key', default='None',
+    parser.add_argument('--eval_label_key', default=None,
                         help='key to use to extract labels from json/csv evaluation datasets')
     defaults = {
                 'world_size': 1,

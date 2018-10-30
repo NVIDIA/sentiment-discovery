@@ -271,12 +271,10 @@ class json_dataset(data.Dataset):
         self.label_key = label_key
         self.loose_json = loose_json
 
-        print('loading json')
         for j in self.load_json_stream(self.path):
             s = j[text_key]
             self.X.append(s)
             self.Y.append(j[label_key])
-        print('loaded json')
 
         if binarize_sent:
             self.Y = binarize_labels(self.Y, hard=binarize_sent)
@@ -430,7 +428,7 @@ class data_shard(object):
                 rtn.extend(seq)
                 rtn_mask.extend(self.get_string_mask(seq))
                 seq_complete = len(rtn) == seq_len
-                self.intra_seq_counter += len_seq
+                self.intra_seq_counter += len(seq)
                 if self.intra_seq_counter >= len(tokenization):
                     if seq_complete:
                         # if sampled seq_len+1 tokens ends on the last token of an example do not advance intra_seq_counter as the last token will be needed for input during next sample
@@ -438,6 +436,8 @@ class data_shard(object):
                     else:
                         self.seq_counter += 1
                         self.intra_seq_counter = 0
+                else:
+                    self.intra_seq_counter -= 1
         return rtn, rtn_mask
 
     def get_string_mask(self, s):

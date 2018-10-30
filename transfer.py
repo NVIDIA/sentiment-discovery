@@ -61,12 +61,9 @@ parser.add_argument('--get-hidden', action='store_true',
                     help='whether to use the hidden state (as opposed to cell state) as features for classifier')
 
 data_config, data_parser = configure_data(parser)
-data_parser.set_defaults(split='1.', data='data/binary_sst/train.csv')
-data_parser.set_defaults(valid='data/binary_sst/val.csv', test='data/binary_sst/test.csv')
+data_parser.set_defaults(split='1.', data=['data/binary_sst/train.csv'])
+data_parser.set_defaults(valid=['data/binary_sst/val.csv'], test=['data/binary_sst/test.csv'])
 args = parser.parse_args()
-
-data_parser.set_defaults(split='1.', data='data/binary_sst/train.csv')
-data_parser.set_defaults(valid='data/binary_sst/val.csv', test='data/binary_sst/test.csv')
 
 args.cuda = torch.cuda.is_available()
 

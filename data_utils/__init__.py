@@ -4,7 +4,7 @@ import math
 from .samplers import BatchSampler, DistributedBatchSampler, TransposedSampler, RandomShardSampler, BatchShardSampler, DistributedBatchShardSampler
 from .loaders import DataLoader, ShardLoader
 from .preprocess import tokenize_str_batch, binarize_labels
-from .datasets import unsupervised_dataset, json_dataset, csv_dataset, split_ds, get_processed_path
+from .datasets import unsupervised_dataset, json_dataset, csv_dataset, split_ds, get_processed_path, ConcatDataset, SplitDataset
 from .lazy_loader import exists_lazy, make_lazy, lazy_array_loader
 from .tokenization import Tokenization, CommandToken, Tokenizer, CharacterLevelTokenizer
 
@@ -46,19 +46,21 @@ def handle(path, text_key, label_key, preprocess=False, split=[1.], loose=False,
                 binarize_sent=False, delim=',', drop_unlabeled=False, lazy=False):
     """gets a dataset and handles splitting it into train/val/test if necessary"""
     tokenizer = CharacterLevelTokenizer()
-    if lazy:
-        if not exists_lazy(path, data_type='data'):
-            text = get_dataset(path, text_key=text_key, label_key=label_key, binarize_sent=binarize_sent,
-                delim=delim, drop_unlabeled=drop_unlabeled, loose_json=loose)
-            make_lazy(path, text.X, data_type='data')
-        text = lazy_array_loader(path, data_type='data', map_fn=tokenizer)
-    else:
-        text = get_dataset(path, text_key=text_key, label_key=label_key, binarize_sent=binarize_sent,
-                delim=delim, drop_unlabeled=drop_unlabeled, loose_json=loose, tokenizer=tokenizer)
-    if should_split(split):
-        return split_ds(text, split)
-    return text
-
+    def get_dataset_from_path(path_):
+        if lazy:
+            if not exists_lazy(path_, data_type='data'):
+                text = get_dataset(path_, text_key=text_key, label_key=label_key, binarize_sent=binarize_sent,
+                    delim=delim, drop_unlabeled=drop_unlabeled, loose_json=loose)
+                make_lazy(path_, text.X, data_type='data')
+            text = lazy_array_loader(path_, data_type='data', map_fn=tokenizer)
+        else:
+            text = get_dataset(path_, text_key=text_key, label_key=label_key, binarize_sent=binarize_sent,
+                    delim=delim, drop_unlabeled=drop_unlabeled, loose_json=loose, tokenizer=tokenizer)
+        return text
+    datasets = [get_dataset_from_path(p) for p in path]
+    if len(datasets) == 1:
+        return datasets[0]
+    return ConcatDataset(datasets)
 
 def post_process_ds(ds, seq_length, ds_type='supervised', shard_split=1., num_shards=1002, persist_state=0):
     """add caching on top of dataset. Add unsupervised wrapper last"""
@@ -82,8 +84,8 @@ def make_dataset(path, seq_length, text_key, label_key, lazy=False, preprocess=F
 
     if should_split(split):
         datasets = []
-        for i, s in enumerate(split):
-            d = post_process_ds(ds[i], seq_length, ds_type=ds_type, persist_state=persist_state, shard_split=s,
+        for i, d in enumerate(split_ds(ds, split)):
+            d = post_process_ds(d, seq_length, ds_type=ds_type, persist_state=persist_state, shard_split=split[i],
                         num_shards=num_shards)
             datasets.append(d)
         ds = datasets
