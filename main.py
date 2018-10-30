@@ -234,8 +234,8 @@ def get_batch(data):
     if args.cuda:
         data = data.cuda()
         reset_mask_batch = reset_mask_batch.cuda()
-    text_batch = Variable(data[:,:-1].t().contiguous(), requires_grad=False)
-    target_batch = Variable(data[:,1:].t().contiguous(), requires_grad=False)
+    text_batch = Variable(data[:, :-1].t().contiguous(), requires_grad=False)
+    target_batch = Variable(data[:, 1:].t().contiguous(), requires_grad=False)
     reset_mask_batch = Variable(reset_mask_batch[:,:text_batch.size(0)].t().contiguous(), requires_grad=False)
     return text_batch, target_batch, reset_mask_batch
 
@@ -262,7 +262,7 @@ def evaluate(data_source, max_iters):
                 loss.data /= args.world_size
             total_loss += loss.data[0]
             i += 1
-    return total_loss / max(len(data_source), 1)
+    return total_loss / max(max_iters, 1)
 
 def train(max_iters, total_iters=0, skipped_iters=0, elapsed_time=False):
     # Turn on training mode which enables dropout.
@@ -388,7 +388,7 @@ try:
         epoch_start_time = time.time()
         val_loss, skipped_iters = train(args.train_iters, total_iters, skipped_iters, elapsed_time)
         elapsed_time += time.time() - epoch_start_time
-        total_iters += len(train_data)
+        total_iters += args.train_iters
         if val_data is not None:
             print('entering eval')
             val_loss = evaluate(val_data, args.eval_iters)

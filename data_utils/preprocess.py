@@ -49,7 +49,7 @@ def process_str(text, front_pad='\n ', end_pad=' ', maxlen=None, clean_markup=Tr
 
     if encode is not None:
         text = text.encode(encoding=encode)
-        text = text.decode(encoding=encode)
+        text = ''.join(chr(c) for c in text)
 
     return text
 
