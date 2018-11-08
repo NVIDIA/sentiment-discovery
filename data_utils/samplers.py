@@ -161,16 +161,30 @@ class TransposedSampler(data.sampler.Sampler):
 
 
 class RandomShardSampler(object):
+    """
+    Sampler for data shards.
+    Purpose: Samples data shards used for L2R unsupervised modeling from the `data_source`.
+    Arguments:
+        data_source (Dataset or array-like): Dataset of tokenizations to sample data from.
+        samples_per_shard (int): Number of samples per shard to gather from `data_source`.
+        seq_len (int): seq_len value to use when creating a data shard. Can be reset later with
+            `set_seq_len`.
+        persist_state (int): persist_state value to use when creating a data shard. See 
+            data_utils.data_shard documentation for valid values. Can be reset later with 
+            `set_persist_state`.
+        random_state (np.RandomState): Random number generator state to use for sampling data. If
+            no value is supplied it uses numpy's default random state (not thread safe).
+    """
 
-    def __init__(self, data_source, samples_per_shard, seq_len=-1, persist_state=0, random=None):
+    def __init__(self, data_source, samples_per_shard, seq_len=-1, persist_state=0, random_state=None):
         self.data_source = data_source
         self.source_size = len(data_source)
         self.samples_per_shard = samples_per_shard
         self.seq_len = seq_len
         self.persist_state = persist_state
-        self.random = random
-        if self.random is None:
-            self.random = np.random
+        self.random_state = random_state
+        if self.random_state is None:
+            self.random_state = np.random
 
     def set_seq_len(self, seq_len):
         self.seq_len = seq_len
@@ -181,10 +195,16 @@ class RandomShardSampler(object):
     def set_persist_state(self, persist_state):
         self.persist_state = persist_state
 
-    def get(self, random=None):
-        if random is None:
-            random = self.random
-        sample_ids = random.randint(self.source_size, size=self.samples_per_shard)
+    def get(self, samples_per_shard=None, random_state=None):
+        """
+        Uses either supplied random state or default random state to sample data from 
+        the data source, create a datashard, and return it.
+        """
+        if samples_per_shard is None:
+            samples_per_shard = self.samples_per_shard
+        if random_state is None:
+            random_state = self.random_state
+        sample_ids = random_state.randint(self.source_size, size=samples_per_shard)
         samples = [self.data_source[i] for i in sample_ids]
         samples = [sample['text'] if isinstance(sample, dict) else sample for sample in samples]
         return data_shard(samples, self.seq_len, self.persist_state)
@@ -194,6 +214,19 @@ class RandomShardSampler(object):
 
 
 class BatchShardSampler(object):
+    """
+    Class to manage the random state of and sample a batch of active shards.
+    Uses one random state per batch index to control sampling of data shards for that batch index.
+    Purpose: Intended for use with data_utils.ShardLoader to perform L2R unsupervised Learning.
+    Arguments: 
+        shard_sampler (RandomShardSampler): shard sampler used to sample data shards.
+        batch_size (int): Batch size to sample.
+        drop_last (boolean): Pretty much useless. Used to give a fake length.
+        random_batch (list): List of random states to use.
+    Attributes:
+        batch (list): Batch of shard queues (a list that contains shards). Call `.get` and 
+            `.isdone()` on `shard_queue[0]` to get next batch and check if shard is done.
+    """
     def __init__(self, shard_sampler, batch_size, drop_last, random_batch=None):
         self.shard_sampler = shard_sampler
         self.batch_size = batch_size
@@ -225,7 +258,7 @@ class BatchShardSampler(object):
             self.batch.append([self.get_shard(b)])
 
     def get_shard(self, b):
-        return self.shard_sampler.get(self.random_batch[b])
+        return self.shard_sampler.get(random_state=self.random_batch[b])
 
     def is_batch_ready(self):
         for shard_queue in self.batch:
@@ -239,21 +272,25 @@ class BatchShardSampler(object):
                 continue
             shard_queue
 
-    def check_and_prep_batch(self):
-        for b, shard_queue in enumerate(self.batch):
-            shard = None
-            queue_len = len(shard_queue)
-            i = 0
-            while i < queue_len:
-                if shard_queue[i].is_done():
-                    shard_queue.pop(i)
-                    i -= 1
-                    queue_len -=1
+    def check_shard_queue(self, b):
+        shard_queue = self.batch[b]
+        queue_len = len(shard_queue)
+        i = 0
+        while i < queue_len:
+            if shard_queue[i].is_done():
+                shard_queue.pop(i)
+                i -= 1
+                queue_len -=1
 
-                elif shard_queue[i].is_last():
-                    shard_queue.append(self.get_shard(b))
-                    queue_len += 1
-                i += 1
+            elif shard_queue[i].is_last():
+                shard_queue.append(self.get_shard(b))
+                queue_len += 1
+            i += 1
+        return shard_queue
+
+    def check_and_prep_batch(self):
+        for b in range(self.batch_size):
+            self.check_shard_queue(b)
 
     def get_batch(self):
         if self.batch is None:
@@ -272,108 +309,32 @@ class BatchShardSampler(object):
             return (len(self.shard_sampler) + self.batch_size - 1) // self.batch_size
 
 class DistributedBatchShardSampler(BatchShardSampler):
-    def __init__(self, shard_sampler, local_batch_size, drop_last, random_batch=None, world_size=1, rank=0):
+    """
+    Coordinates random states so that shard sampling for distributed training can be coordinated
+    without any communication between distributed processes. This is possible since random numbers
+    are pseudo-deterministic, so if the random states of the global batch are known data loading
+    can be coordinated without communication with other processes.
+    Purpose: For use with distributed training of L2R modeling.
+    Arguments: 
+        shard_sampler (RandomShardSampler): Shard sampler used to sample data shards.
+        local_batch_size (int): Local batch size to sample.
+        drop_last (boolean): Pretty much useless. Used to give a fake length.
+        local_random_batch (list): List of random states to use locally for this worker.
+        world_size (int): Number of workers in distributed training.
+        rank (int): Rank of this distributed worker.
+    Attributes:
+        batch (list): Batch of shard queues (a list that contains shards). Call `.get` and 
+            `.isdone()` on `shard_queue[0]` to get next batch and check if shard is done.
+    """
+    def __init__(self, shard_sampler, local_batch_size, drop_last, local_random_batch=None, world_size=1, rank=0):
         self.global_batch_size = int(local_batch_size*world_size)
-        if random_batch is None:
-            random_batch = [np.random.RandomState(seed) for seed in np.random.randint(self.global_batch_size*999, size=self.global_batch_size)]
-            random_batch = random_batch[local_batch_size*rank:local_batch_size*(rank+1)]
-        super(DistributedBatchShardSampler, self).__init__(shard_sampler, local_batch_size, drop_last, random_batch)
+        if local_random_batch is None:
+            local_random_batch = [np.random.RandomState(seed) for seed in np.random.randint(self.global_batch_size*999, size=self.global_batch_size)]
+            local_random_batch = local_random_batch[local_batch_size*rank:local_batch_size*(rank+1)]
+        super(DistributedBatchShardSampler, self).__init__(shard_sampler, local_batch_size, drop_last, local_random_batch)
 
     def __len__(self):
         if self.drop_last:
             return len(self.sampler) // self.global_batch_size
         else:
             return (len(self.sampler) + self.global_batch_size - 1) // self.global_batch_size
-
-# class ShardedSampler(data.sampler.Sampler):
-#     def __init__(self,data_source,batch_size,data_sampler=None,num_shards=1000):
-#         """data_sampler depricated"""
-#         self.data_source=data_source
-#         self.batch_size=batch_size
-#         len_ds=len(data_source)
-#         num_strs=data_source.num_strs
-#         self.data_sampler=data_sampler
-#         self.wrap_around=0
-#         self.num_shards=num_shards
-#         self.shard_size=len_ds//num_shards
-#         # self.shards=list(np.arange(num_shards)*shard_size)
-#         # self.shards=self.get_all_shards()
-#         self.shards=self.prepared_shards(self.get_all_shards())
-#         self.len_ds=self.get_len()
-#         self.active_shards=[]
-#         self.shards_started=0
-
-#     def strat_helper(self,x):
-#         active_shard_ind=x%self.batch_size
-#         if len(active_shards)<self.batch_size:
-#             self.active_shards.append()
-
-#     def __iter__(self):
-#         if self.data_sampler is None:
-#             # return iter(map(self.strat_helper,range(len(self))))
-#             return iter(map(self.shard_helper,self.loop_shards(self.shards)))
-#     def shardhelper(self):
-
-#     def __len__(self):
-#         return self.len_ds
-
-#     def get_shard_length(self,shard_start_ind):
-#         return self.data_source.get_shard_length(shard_start_ind,self.shard_size)
-
-#     def get_all_shards(self):
-#         shard_start_inds=list(np.arange(self.num_shards)*self.shard_size)
-#         shard_lens=[self.get_shard_length(shard_start_ind) for x in shard_start_inds]
-#         shards=list(zip(shard_start_inds,shard_lens))
-#         return shards
-
-#     def prepare_shards(self,shards):
-#         prepared_shards=sorted(shards,key=lambda x:x[1],reverse=True)
-#         return prepared_shards
-
-#     def get_len(self,shards):
-#         # shard_copy=shards.copy()
-#         # ctr=0
-#         # active_shards=[shard_copy.pop(0) for x in range(self.batch_size)]
-#         # while True:
-#         #     i=0
-#         #     should_break=False
-#         #     while i<len(active_shards):
-#         #         s=active_shards[i]
-#         #         s[1]-=1
-#         #         if s[1]==0:
-#         #             if len(shard_copy)>0:
-#         #                 should_break=True
-#         #                 break
-#         #             active_shards[i]=shard_copy.pop(0)
-#         #         i+=1
-#         #     if should_break:
-#         #         break
-#         #     ctr+=1
-#         ctr=0
-#         for idx in self.loop_shards(shards):
-#             ctr+=1
-#         return ctr/self.batch_size
-
-#     def loop_shards(self,shards):
-#         shard_copy=shards.copy()
-#         active_shards=[shard_copy.pop(0) for x in range(self.batch_size)]
-#         shard_ctr=[0]*len(active_shards)
-#         while True:
-#             i=0
-#             should_break=False
-#             while i<len(active_shards):
-#                 s=active_shards[i]
-#                 s[1]-=1
-#                 cnt=shard_ctr[i]
-#                 shard_ctr[i]+=1
-#                 if s[1]==0:
-#                     if len(shard_copy)>0:
-#                         should_break=True
-#                         break
-#                     active_shards[i]=shard_copy.pop(0)
-#                     shard_ctr[i]=0
-#                 yield (s[0],cnt)
-#                 i+=1
-#             if should_break:
-#                 break
-

@@ -57,6 +57,8 @@ if args.fp16:
 
 with open(args.load_model, 'rb') as f:
     sd = torch.load(f)
+    if 'sd' in sd:
+        sd = sd['sd']
 
 try:
     model.load_state_dict(sd)

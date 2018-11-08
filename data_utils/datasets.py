@@ -45,7 +45,7 @@ class ConcatDataset(data.Dataset):
     large-scale datasets as the concatenation operation is done in an
     on-the-fly manner.
     Arguments:
-        datasets (sequence): List of datasets to be concatenated
+        datasets (sequence): List of datasets to be concatenated.
     """
 
     @staticmethod
@@ -100,6 +100,15 @@ class ConcatDataset(data.Dataset):
         return self.cumulative_sizes
 
 class SplitDataset(data.Dataset):
+    """
+    Dataset wrapper to access a subset of another dataset.
+    Purpose: useful to index into existing datasets, possibly
+    large-scale datasets as the subindexing operation is done in an
+    on-the-fly manner.
+    Arguments:
+        ds (Dataset or array-like): List of datasets to be subindexed
+        split_inds (1D array-like): List of indices part of subset
+    """
     def __init__(self, ds, split_inds):
         self.split_inds = list(split_inds)
         self.wrapped_data = ds
@@ -132,9 +141,20 @@ class SplitDataset(data.Dataset):
             yield self.wrapped_data[idx]
 
 def split_ds(ds, split=[.8,.2,.0], shuffle=True):
-    """randomly split a dataset into train/val/test given a percentage of how much to allocate to training"""
+    """
+    Split a dataset into subsets given proportions of how
+    much to allocate per split. If a split is 0% returns None for that split.
+    Purpose: Useful for creating train/val/test splits
+    Arguments:
+        ds (Dataset or array-like): Data to be split.
+        split (1D array-like): proportions to split `ds`. `sum(splits) != 0`
+        shuffle (boolean): Randomly split dataset. Default: True
+    """
+    split_sum = sum(split)
+    if split_sum == 0:
+        raise Exception('Split cannot sum to 0.')
     split = np.array(split)
-    split /= np.sum(split)
+    split /= split_sum
     ds_len = len(ds)
     inds = np.arange(ds_len)
     if shuffle:
@@ -155,16 +175,17 @@ def split_ds(ds, split=[.8,.2,.0], shuffle=True):
 
 class csv_dataset(data.Dataset):
     """
-    class for loading dataset for sentiment transfer
-    Args:
-        path (str): path to csv file with dataset.
-        preprocess_fn (callable): callable function that process a string into desired format.
-            Takes string, maxlen=None, encode=None as arguments. Default: process_str
-        delim (str): delimiter for csv. Default: False
-        binarize_sent (bool): binarize sentiment values to 0 or 1 if they\'re on a different scale. Default: False
+    Class for loading datasets from csv files.
+    Purpose: Useful for loading data for unsupervised modeling or transfer tasks
+    Arguments:
+        path (str): Path to csv file with dataset.
+        tokenizer (data_utils.Tokenizer): Tokenizer to use when processing text. Default: None
+        preprocess_fn (callable): Callable that process a string into desired format.
+        delim (str): delimiter for csv. Default: ','
+        binarize_sent (bool): binarize label values to 0 or 1 if they\'re on a different scale. Default: False
         drop_unlabeled (bool): drop rows with unlabelled sentiment values. Always fills remaining empty
-            columns with 0 (regardless if rows are dropped based on sentiment value) Default: False
-        text_key (str): key to get text from json dictionary. Default: 'sentence'
+            columns with -1 (regardless if rows are dropped based on sentiment value) Default: False
+        text_key (str): key to get text from csv. Default: 'sentence'
         label_key (str): key to get label from json dictionary. Default: 'label'
     Attributes:
         X (list): all strings from the csv file
@@ -187,15 +208,6 @@ class csv_dataset(data.Dataset):
 
         self.X = []
         self.Y = []
-#        if drop_unlabeled:
-#            data = pd.read_csv(load_path, sep=delim, usecols=['Sentiment', text_key, label_key],
-#                encoding='unicode_escape')
-#            self.Sentiment = data['Sentiment'].values
-#            data = data.dropna(axis=0, subset=['Sentiment'])
-#        else:
-#            data = pd.read_csv(load_path, sep=delim, usecols=[text_key, label_key])
-
- #       data = data.fillna(value=-1)
         try:
             data = pd.read_csv(self.path, sep=self.delim, usecols=[text_key, label_key], encoding='latin-1')
         except:
@@ -248,10 +260,11 @@ class csv_dataset(data.Dataset):
 
 class json_dataset(data.Dataset):
     """
-    class for loading a dataset from a json dump
-    Args:
+    Class for loading datasets from a json dump.
+    Purpose: Useful for loading data for unsupervised modeling or transfer tasks
+    Arguments:
         path (str): path to json file with dataset.
-        preprocess (bool): whether to call preprocess_fn on strings in dataset. Default: False
+        tokenizer (data_utils.Tokenizer): Tokenizer to use when processing text. Default: None
         preprocess_fn (callable): callable function that process a string into desired format.
             Takes string, maxlen=None, encode=None as arguments. Default: process_str
         text_key (str): key to get text from json dictionary. Default: 'sentence'
@@ -367,17 +380,21 @@ def get_shard_indices(num_strs, num_shards=1000):
 
 class data_shard(object):
     """
-    Args:
+    Data Shard of multiple tokenizations.
+    Purpose: Useful in L2R unsupervised learning. It's stateful and on consecutive
+    calls to `get` it returns the next sequence of tokens following the last 
+    sequence of tokens returned.
+    Arguments:
         data (Tokenization or list): data comprising the data shard. Either a Tokenization or list of Tokenizations.
         seq_len (int): sequence length to sample from shard
         persist_state (int): one of -1,0,1 specifying whether to never reset state,
             reset after every sentence, or at end of every shard. Default: 0
     Attributes:
-        all_strs (list): all strings from data concatenated together
-        str_ends (list): cummulative lengths of `all_strs` if they were all concat'd to gether.
+        all_seq (list): list of all tokenizations
+        seq_ends (list): cummulative lengths of `all_strs` if they were all concat'd to gether.
             `itertools.accumulate([len(s) for s in all_strs])
-        total_chars (int): str_ends[-1]
-        num_strs (int): len(data)
+        total_toks (int): `seq_ends[-1]`
+        num_seq (int): `len(all_seq)`
     """
     def __init__(self, data, seq_len=-1, persist_state=0):
         self.seq_len = seq_len
@@ -396,7 +413,7 @@ class data_shard(object):
                 self.seq_ends.append(len(s)+self.seq_ends[-1])
 
         self.pad = self.all_seq[-1].pad
-        self.total_chars = self.seq_ends[-1]
+        self.total_toks = self.seq_ends[-1]
         self.counter = 0
         self.seq_counter = 0
         self.intra_seq_counter = 0
@@ -405,10 +422,13 @@ class data_shard(object):
         self.seq_len = val
 
     def _get(self, seq_len):
+        """
+        Get next sequence and reset mask of `seq_len` length.
+        """
         rtn_mask = []
         rtn = []
         if seq_len <= 0:
-            self.counter = self.total_chars
+            self.counter = self.total_toks
             rtn = []
             for seq in self.all_seq:
                 s = seq[:]
@@ -441,6 +461,9 @@ class data_shard(object):
         return rtn, rtn_mask
 
     def get_string_mask(self, s):
+        """
+        Get hidden state reset mask for string being currently sampled.
+        """
         start_mask = 0
         if self.persist_state == PERSIST_SHARD:
             start_mask = (self.seq_counter == 0 and self.intra_seq_counter == 0)
@@ -450,6 +473,10 @@ class data_shard(object):
 
 
     def get(self, seq_len=None):
+        """
+        Get the next sequence from the data shard as well as state reset and padding/loss masks.
+        Returns a sequence of seq_len+1 so that i`nputs, targets = sequence[:-1], sequence[1:]`
+        """
         if seq_len is None:
             seq_len = self.seq_len
         rtn, rtn_mask = self._get(seq_len)
@@ -464,134 +491,17 @@ class data_shard(object):
             # mask all padding + the last valid target token to 0 since they won't be used in loss computation
             loss_mask = [1]*(rtn_len-1) + [0]*(num_padding+1)
         else:
-            self.counter = self.total_chars
+            self.counter = self.total_toks
             loss_mask = [1]*rtn_len
         return np.array(rtn), np.array(rtn_mask), np.array(loss_mask)
 
     def is_last(self):
-        return self.counter >= self.total_chars-self.seq_len -1
+        return self.counter >= self.total_toks-self.seq_len -1
         
     def is_done(self):
-        return self.counter >= self.total_chars-1
+        return self.counter >= self.total_toks-1
 
     def __iter__(self):
         self.counter = 0
-        while self.counter < self.total_chars:
+        while self.counter < self.total_toks:
             yield self.get(self.seq_len)
-
-class unsupervised_dataset(data.Dataset):
-    """
-    class for loading dataset for unsupervised text reconstruction
-    Args:
-        path (str): instance of a dataset.
-        seq_len (int): path to json file with dataset.
-        persist_state (int): one of -1,0,1 specifying whether to never reset state,
-            reset after every sentence, or at end of every shard. Default: 0
-        num_shards (int): number of shards to split dataset into.
-    Attributes:
-        all_strs (list): all strings from the data file
-        str_ends (list): cummulative lengths of `all_strs` if they were all concat'd to gether.
-            `itertools.accumulate([len(s) for s in all_strs])`
-        total_chars (int): str_ends[-1]
-        num_strs (int): len(all_strs)
-        shard_starts (set): set containing indices of what strings
-    """
-    def __init__(self, ds, seq_len=256, persist_state=PERSIST_SHARD, num_shards=1):
-        # self.path = path
-        self.persist_state = persist_state
-        # self.lazy = lazy
-        if isinstance(ds, lazy_array_loader) or (isinstance(ds, train_val_test_wrapper) and ds.is_lazy):
-            self.all_strs = ds
-            self.str_ends = list(accumulate(ds.lens))
-        else:
-            self.all_strs = ds.X
-            self.str_ends = list(accumulate(map(len, self.all_strs)))
-        self.total_chars = self.str_ends[-1]
-        self.num_strs = len(self.all_strs)
-
-        #get indices of shard starts for the strings
-        self.set_num_shards(num_shards)
-
-        self.set_seq_len(seq_len)
-
-    def set_seq_len(self, seq_len):
-        self.seq_len = seq_len
-        assert self.seq_len != 0
-        if self.seq_len < 0:
-            self.seq_len = (self.total_chars-1)//(-self.seq_len)
-
-    def set_num_shards(self, num_shards):
-        self.shard_starts = get_shard_indices(self.num_strs, num_shards)
-
-    def __len__(self):
-        if self.seq_len >= self.total_chars-1:
-            return 1
-        return (self.total_chars-1)//self.seq_len
-
-    def __getitem__(self, index):
-        """
-        Concatenates srings together into sequences of seq_len.
-        Gets the index'th such concatenated sequence.
-        """
-        #search for what string corresponds to the start of a sequence index
-        str_ind = self.binary_search_strings(index)%self.num_strs
-        #find what index to start from in start string
-        #first find what character the previous string ended at/our string starts at
-        if str_ind != 0:
-            str_start_ind = self.str_ends[str_ind-1]
-        else:
-            str_start_ind = 0
-
-        #subtract string start index from sequence start index
-        start_char = index*self.seq_len-str_start_ind
-
-        if self.seq_len >= self.total_chars-1:
-            rtn_strings = list(self.all_strs)
-        else:
-            rtn_strings = []
-            #get first string of sequence
-            rtn = self.all_strs[str_ind]
-            rtn_strings.append(rtn)
-            rtn_length = len(rtn)-start_char
-
-            #concatenate additional strings so that this sequence reaches the maximum sequence length+1
-            i = 0
-            while rtn_length < self.seq_len+1:
-                #increment string index
-                other_str_idx = (str_ind+i+1)%self.num_strs
-                s = self.all_strs[other_str_idx]
-                s = s[:self.seq_len+1-rtn_length]
-
-                rtn_strings.append(s)
-                rtn_length += len(s)
-                i += 1
-
-        rtn_masks = []
-        for i, s in enumerate(rtn_strings):
-            rtn_masks.append(self.get_str_mask(s, str_ind+i))
-
-        rtn_strings[0] = rtn_strings[0][start_char:start_char+self.seq_len+1]
-        rtn_masks[0] = rtn_masks[0][start_char:start_char+self.seq_len+1]
-
-        rtn = ''.join(rtn_strings)
-        rtn_mask = [bit for mask in rtn_masks for bit in mask]
-        masklen = len(rtn_mask)
-        rtn_mask += [1]*max(len(rtn)-masklen, 0)
-        rtn_mask = rtn_mask[:self.seq_len+1]
-
-        return (rtn, np.array(rtn_mask))
-
-    def binary_search_strings(self, sequence_index):
-        """binary search string endings to find which string corresponds to a specific sequence index"""
-        return bisect_left(self.str_ends, sequence_index*self.seq_len)
-
-    def get_str_mask(self, string, str_ind):
-        """get mask for when to reset state in a given sequence"""
-        if self.persist_state == PERSIST_SHARD:
-            rtn_mask = [int(str_ind in self.shard_starts)]+[0]*(len(string)-1)
-        elif self.persist_state == RESET_STATE:
-            rtn_mask = [1]+[0]*(len(string)-1)
-        else:
-            rtn_mask = [0]*(len(string))
-        return rtn_mask
-

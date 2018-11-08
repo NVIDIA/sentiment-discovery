@@ -84,6 +84,8 @@ if args.fp16:
 # load char embedding and recurrent encoder for featurization
 with open(args.load_model, 'rb') as f:
     sd = x = torch.load(f)
+    if 'sd' in sd:
+        sd = sd['sd']
     if 'encoder' in sd:
         sd = sd['encoder']
 
