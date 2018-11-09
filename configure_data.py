@@ -10,14 +10,17 @@ class DataConfig(object):
         self.defaults = defaults
     def apply(self, opt):
         print('configuring data')
-        for k, v in self.defaults.items():
-            if not hasattr(opt, k):
-                setattr(opt, k, v)
+        self.apply_defaults()
         return make_loaders(opt)
 
     def set_defaults(self, **kwargs):
         for k, v in kwargs.items():
             self.defaults[k] = v
+
+    def apply_defaults(self):
+        for k, v in self.defaults.items():
+            if not hasattr(opt, k):
+                setattr(opt, k, v)
 
 def make_loaders(opt):
     """makes training/val/test"""
@@ -29,12 +32,10 @@ def make_loaders(opt):
     eval_seq_length = opt.eval_seq_length
     if opt.eval_seq_length < 0:
         eval_seq_length = eval_seq_length * opt.world_size
-    # TODO: fix data race in lazy loader
-    # data_loader_args = {'num_workers': 10, 'shuffle': opt.shuffle, 'batch_size': batch_size,
     data_loader_args = {'num_workers': 1, 'shuffle': opt.shuffle, 'batch_size': batch_size,
                     'pin_memory': True, 'transpose': opt.transpose, 'distributed': opt.world_size > 1,
                     'rank': opt.rank, 'world_size': opt.world_size, 'drop_last': opt.world_size > 1}
-    if opt.data_set_type == 'unsupervised':
+    if opt.data_set_type == 'L2R':
         loader_type = data_utils.ShardLoader
         data_loader_args.update({'seq_len': seq_length, 'persist_state': opt.persist_state, 'samples_per_shard': opt.samples_per_shard})
     else:
@@ -52,7 +53,7 @@ def make_loaders(opt):
         eval_loader_args['batch_size'] = eval_batch_size
     if opt.eval_seq_length != 0:
         eval_set_args['seq_length'] = eval_seq_length
-        if opt.data_set_type == 'unsupervised':
+        if opt.data_set_type == 'L2R':
             eval_loader_args['seq_len'] = eval_seq_length
     if opt.eval_text_key is not None:
         eval_set_args['text_key'] = opt.eval_text_key
@@ -79,18 +80,8 @@ def make_loaders(opt):
     if train is not None and opt.batch_size > 0:
         train = loader_type(train, **data_loader_args)
     if valid is not None:
-        # if opt.data_set_type == 'unsupervised':
-        #     if opt.eval_seq_length != 0:
-        #         valid.set_seq_len(eval_seq_length)
-        #     if opt.val_shards != 0:
-        #         valid.set_num_shards(opt.val_shards)
         valid = loader_type(valid, **eval_loader_args)
     if test is not None:
-        # if opt.data_set_type == 'unsupervised':
-        #     if opt.eval_seq_length != 0:
-        #         test.set_seq_len(eval_seq_length)
-        #     if opt.test_shards != 0:
-        #         test.set_num_shards(opt.test_shards)
         test = loader_type(test, **eval_loader_args)
     return train, valid, test
 

@@ -58,32 +58,43 @@ def prep_command_tokens(tokenlist):
 class Tokenizer(object):
 	def __init__(self, command_tokens=None):
 		self.command_tokens = command_tokens
+		self.num_command_tokens = len(self.command_tokens)
+		if not self.__hasattr__('num_text_tokens'):
+			self.num_text_tokens = 0
+		self.num_tokens = self.num_command_tokens + self.num_text_tokens
 
 	def __call__(self, text, process_fn=None):
 		return self.EncodeAsIds(text, process_fn)
 
+	def Train(self, corpus):
+		raise NotImplementedError('Tokenizer Train not implemented')
+
 	def EncodeAsIds(self, text, process_fn=None):
-		raise NotImplementedError('EncodeAsIds not implemented')
+		raise NotImplementedError('Tokenizer EncodeAsIds not implemented')
 
 	def EncodeAsTokens(self, text, process_fn=None):
-		raise NotImplementedError('EncodeAsTokens not implemented')
+		raise NotImplementedError('Tokenizer EncodeAsTokens not implemented')
 
 	def IdToToken(self, id):
-		raise NotImplementedError('IdToToken not implemented')
+		raise NotImplementedError('Tokenizer IdToToken not implemented')
 
 	def TokenToId(self, token):
-		raise NotImplementedError('TokenToId not implemented')
+		raise NotImplementedError('Tokenizer TokenToId not implemented')
 
 	def DecodeIds(self, Ids):
-		raise NotImplementedError('DecodeIds not implemented')
+		raise NotImplementedError('Tokenizer DecodeIds not implemented')
 
 	def DecodeTokens(self, Tokens):
-		raise NotImplementedError('DecodeTokens not implemented')
+		raise NotImplementedError('Tokenizer DecodeTokens not implemented')
 
 class CharacterLevelTokenizer(Tokenizer):
 	def __init__(self, process_fn=process_str, pad_token=('<PAD>', 0)):
 		self.process_fn = process_fn
+		self.num_text_tokens = 256
 		super(CharacterLevelTokenizer, self).__init__(prep_command_tokens([('pad', pad_token)]))
+
+	def Train(self, corpus):
+		pass
 
 	def EncodeAsIds(self, text, process_fn=None):
 		processed_text = text
@@ -120,3 +131,6 @@ class CharacterLevelTokenizer(Tokenizer):
 		if isinstance(Tokens, Tokenization):
 			Tokens = Tokens.tokenization
 		return ''.join(Tokens)
+
+class SentencePieceTokenizer(Tokenizer):
+	def __init__(self, process_fn=process_str, pad_token=('<PAD>', 0)):

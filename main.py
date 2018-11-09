@@ -77,7 +77,7 @@ parser.add_argument('--tcp-port', type=int, default=6000,
 
 # Add dataset args to argparser and set some defaults
 data_config, data_parser = configure_data(parser)
-data_config.set_defaults(data_set_type='unsupervised', transpose=True)
+data_config.set_defaults(data_set_type='L2R', transpose=True)
 data_parser.set_defaults(split='100,1,1')
 data_parser = parser.add_argument_group('language modeling data options')
 data_parser.add_argument('--seq_length', type=int, default=256,
