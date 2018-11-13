@@ -72,7 +72,7 @@ if args.seed is not -1:
     if args.cuda:
         torch.cuda.manual_seed(args.seed)
 
-train_data, val_data, test_data = data_config.apply(args)
+(train_data, val_data, test_data), tokenizer = data_config.apply(args)
 ntokens = args.data_size
 model = model.RNNFeaturizer(args.model, ntokens, args.emsize, args.nhid, args.nlayers, 0.0, args.all_layers)
 if args.cuda:

@@ -8,16 +8,17 @@ class DataConfig(object):
         super(DataConfig,self).__init__()
         self.parser = parser
         self.defaults = defaults
+
     def apply(self, opt):
         print('configuring data')
-        self.apply_defaults()
+        self.apply_defaults(opt)
         return make_loaders(opt)
 
     def set_defaults(self, **kwargs):
         for k, v in kwargs.items():
             self.defaults[k] = v
 
-    def apply_defaults(self):
+    def apply_defaults(self, opt):
         for k, v in self.defaults.items():
             if not hasattr(opt, k):
                 setattr(opt, k, v)
@@ -44,7 +45,9 @@ def make_loaders(opt):
     data_set_args = {
         'path': opt.data, 'seq_length': seq_length, 'lazy': opt.lazy, 'delim': opt.delim,
         'text_key': opt.text_key, 'label_key': opt.label_key, 'preprocess': opt.preprocess,
-        'ds_type': opt.data_set_type, 'split': split, 'loose': opt.loose_json}
+        'ds_type': opt.data_set_type, 'split': split, 'loose': opt.loose_json,
+        'tokenizer_type': opt.tokenizer_type, 'tokenizer_model_path': opt.tokenizer_path,
+        'vocab_size': opt.vocab_size, 'model_type': opt.tokenizer_model_type}
     eval_loader_args = copy.copy(data_loader_args)
     eval_set_args = copy.copy(data_set_args)
     eval_set_args['split']=[1.]
@@ -65,9 +68,10 @@ def make_loaders(opt):
     test = None
 
     if opt.data is not None:
-        train = data_utils.make_dataset(**data_set_args)
+        train, tokenizer = data_utils.make_dataset(**data_set_args)
         if should_split(split):
             train, valid, test = train
+    eval_set_args['tokenizer'] = tokenizer
 
     if opt.valid is not None:
         eval_set_args['path'] = opt.valid
@@ -83,7 +87,7 @@ def make_loaders(opt):
         valid = loader_type(valid, **eval_loader_args)
     if test is not None:
         test = loader_type(test, **eval_loader_args)
-    return train, valid, test
+    return (train, valid, test), tokenizer
 
 def should_split(split):
     return max(split) != 1.
@@ -141,6 +145,15 @@ def configure_data(parser):
                         help='key to use to extract text from json/csv evaluation datasets')
     parser.add_argument('--eval_label_key', default=None,
                         help='key to use to extract labels from json/csv evaluation datasets')
+    # tokenizer arguments
+    parser.add_argument('--tokenizer_type', type=str, default='CharacterLevelTokenizer', choices=['CharacterLevelTokenizer', 'SentencePieceTokenizer'],
+                        help='what type of tokenizer to use')
+    parser.add_argument('--tokenizer_model_type', type=str, default='bpe', choices=['bpe', 'char', 'unigram', 'word'],
+                        help='Model type to use for sentencepiece tokenization')
+    parser.add_argument('--vocab_size', type=int, default=256,
+                        help='vocab size to use for non-character-level tokenization')
+    parser.add_argument('--tokenizer_path', type=str, default='tokenizer.model',
+                        help='path used to save/load sentencepiece tokenization models')
     defaults = {
                 'world_size': 1,
                 'rank': -1,

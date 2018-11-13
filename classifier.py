@@ -46,7 +46,7 @@ args = parser.parse_args()
 
 args.cuda = torch.cuda.is_available()
 
-train_data, val_data, test_data = data_config.apply(args)
+(train_data, val_data, test_data), tokenizer = data_config.apply(args)
 ntokens = args.data_size
 model = SentimentClassifier(args.model, ntokens, args.emsize, args.nhid, args.nlayers, 0.0, args.all_layers)
 if args.cuda:

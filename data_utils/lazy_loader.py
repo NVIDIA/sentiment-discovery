@@ -57,6 +57,14 @@ def split_strings(strings, start, chr_lens):
     """
     return [strings[i-start:j-start] for i, j in zip([start]+chr_lens[:-1], chr_lens)]
 
+class ProcessorTokenizer:
+    def __init__(self, tokenizer, process_fn=None):
+        self.tokenizer = tokenizer
+        self.process_fn = process_fn
+
+    def __call__(self, string):
+        return self.tokenizer(string, process_fn=self.process_fn)
+
 class lazy_array_loader(object):
     """
     Arguments:
@@ -83,6 +91,9 @@ class lazy_array_loader(object):
         self.dumb_ends = list(self.ends)
         self.read_lock = Lock()
         self.map_fn = map_fn
+
+    def SetTokenizer(self, tokenizer):
+        self.map_fn = ProcessorTokenizer(tokenizer, self.map_fn)
 
     def __getitem__(self, index):
         """read file and splice strings based on string ending array `ends` """

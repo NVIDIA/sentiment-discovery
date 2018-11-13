@@ -57,13 +57,17 @@ class ConcatDataset(data.Dataset):
             s += l
         return r
 
-    def __init__(self, datasets):
+    def __init__(self, datasets, **kwargs):
         super(ConcatDataset, self).__init__()
         assert len(datasets) > 0, 'datasets should not be an empty iterable'
         self.datasets = list(datasets)
         self.cumulative_sizes = self.cumsum(self.datasets)
         self._X = None
         self._Y = None
+
+    def SetTokenizer(self, tokenizer):
+        for ds in self.datasets:
+            ds.SetTokenizer(tokenizer)
 
     def __len__(self):
         return self.cumulative_sizes[-1]
@@ -109,7 +113,7 @@ class SplitDataset(data.Dataset):
         ds (Dataset or array-like): List of datasets to be subindexed
         split_inds (1D array-like): List of indices part of subset
     """
-    def __init__(self, ds, split_inds):
+    def __init__(self, ds, split_inds, **kwargs):
         self.split_inds = list(split_inds)
         self.wrapped_data = ds
         self.is_lazy = isinstance(ds, lazy_array_loader)
@@ -195,7 +199,7 @@ class csv_dataset(data.Dataset):
                 binarize_sent=False, drop_unlabeled=False, text_key='sentence', label_key='label',
                 **kwargs):
         self.preprocess_fn = preprocess_fn
-        self.tokenizer = tokenizer
+        self.tokenizer = self.SetTokenizer(tokenizer)
         self.path = path
         self.delim = delim
         self.text_key = text_key
@@ -224,6 +228,9 @@ class csv_dataset(data.Dataset):
         if binarize_sent:
             self.Y = binarize_labels(self.Y, hard=binarize_sent)
 
+    def SetTokenizer(self, tokenizer):
+        self.tokenizer = tokenizer
+
     def __len__(self):
         return len(self.X)
 
@@ -232,6 +239,8 @@ class csv_dataset(data.Dataset):
         x = self.X[index]
         if self.tokenizer is not None:
             x = self.tokenizer.EncodeAsIds(x, self.preprocess_fn)
+        elif self.preprocess_fn is not None:
+            x = self.preprocess_fn(x)
         y = self.Y[index]
         return {'text': x, 'length': len(x), 'label': y}
 
@@ -277,7 +286,7 @@ class json_dataset(data.Dataset):
                 text_key='sentence', label_key='label', loose_json=False, **kwargs):
         self.preprocess_fn = preprocess_fn
         self.path = path
-        self.tokenizer = tokenizer
+        self.tokenizer = self.SetTokenizer(tokenizer)
         self.X = []
         self.Y = []
         self.text_key = text_key
@@ -292,11 +301,16 @@ class json_dataset(data.Dataset):
         if binarize_sent:
             self.Y = binarize_labels(self.Y, hard=binarize_sent)
 
+    def SetTokenizer(self, tokenizer):
+        self.tokenizer = tokenizer
+
     def __getitem__(self, index):
         """gets the index'th string from the dataset"""
         x = self.X[index]
         if self.tokenizer is not None:
             x = self.tokenizer.EncodeAsIds(x, self.preprocess_fn)
+        elif self.preprocess_fn is not None:
+            x = self.preprocess_fn(x)
         y = self.Y[index]
         return {'text': x, 'length': len(x), 'label': y}
 
@@ -373,11 +387,6 @@ class json_dataset(data.Dataset):
                 j[self.label_key] = -1
             yield j
 
-def get_shard_indices(num_strs, num_shards=1000):
-    shard_size = num_strs//num_shards
-    inds = list(np.arange(num_shards)*shard_size)
-    return set(inds)
-
 class data_shard(object):
     """
     Data Shard of multiple tokenizations.
@@ -396,7 +405,7 @@ class data_shard(object):
         total_toks (int): `seq_ends[-1]`
         num_seq (int): `len(all_seq)`
     """
-    def __init__(self, data, seq_len=-1, persist_state=0):
+    def __init__(self, data, seq_len=-1, persist_state=0, **kwargs):
         self.seq_len = seq_len
         self.persist_state = persist_state
 
