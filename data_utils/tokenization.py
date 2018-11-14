@@ -81,6 +81,7 @@ class Tokenizer(object):
         self.command_token_map = {}
         self.command_id_map = {}
         if command_tokens is not None:
+            self.command_name_map = {tok.name: tok for tok in command_tokens}
             self.command_token_map = {tok.token: tok for tok in command_tokens}
             self.command_id_map = {tok.Id: tok for tok in command_tokens}
         self.num_command_tokens = len(self.command_tokens)
@@ -147,10 +148,10 @@ class CharacterLevelTokenizer(Tokenizer):
         return Tokenization(tokens, processed_text, text, self.command_tokens, asIds=False)
 
     def IdToToken(self, Id):
-        return chr(Id)
+        return chr(Id - self.num_command_tokens)
 
     def TokenToId(self, token):
-        return ord(token)
+        return ord(token) + self.num_command_tokens
 
     def DecodeIds(self, Ids):
         if isinstance(Ids, Tokenization):
@@ -208,7 +209,7 @@ class SentencePieceTokenizer(Tokenizer):
             self.spm_model = self.spm_model+'.model'
         self.sp = spm.SentencePieceProcessor()
         self.sp.Load(self.spm_model)
-        self.vocab_size = len(self.sp)
+        self.vocab_size = self.num_text_tokens = len(self.sp)
 
     def Train(self, corpus, num_text_tokens):
         self.num_text_tokens = num_text_tokens
@@ -237,7 +238,8 @@ class SentencePieceTokenizer(Tokenizer):
         processed_text = text
         if process_fn is not None:
             processed_text = process_fn(processed_text)
-        tokens = self.sp.EncodeAsIds(processed_text)
+        tokens = [tok + self.num_command_tokens for tok in self.sp.EncodeAsIds(processed_text)]
+        # tokens = self.sp.EncodeAsIds(processed_text)
         return Tokenization(tokens, processed_text, text, self.command_tokens)
 
     def EncodeAsTokens(self, text, process_fn=None):
@@ -248,15 +250,17 @@ class SentencePieceTokenizer(Tokenizer):
         return Tokenization(tokens, processed_text, text, self.command_tokens, asIds=False)
 
     def IdToToken(self, Id):
-        return self.sp.IdToToken(Id)
+        return self.sp.IdToToken(Id - self.num_command_tokens)
+        # return self.sp.IdToToken(Id)
 
     def TokenToId(self, token):
-        return self.sp.TokenToId(token)
+        return self.sp.TokenToId(token) + self.num_command_tokens
 
     def DecodeIds(self, Ids):
         if isinstance(Ids, Tokenization):
             Ids = Ids.tokenization
-        return self.sp.DecodeIds(Ids)
+        return self.sp.DecodeIds([Ids - self.num_command_tokens])
+        # return self.sp.DecodeIds(Ids)
 
     def DecodeTokens(self, Tokens):
         if isinstance(Tokens, Tokenization):

@@ -157,9 +157,6 @@ def configure_data(parser):
     defaults = {
                 'world_size': 1,
                 'rank': -1,
-                'num_shards': 1002,
-                'val_shards': 0,
-                'test_shards': 0,
                 'persist_state': 0,
                 'lazy': False,
                 'shuffle': False,

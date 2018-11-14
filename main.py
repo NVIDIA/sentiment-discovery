@@ -152,7 +152,7 @@ if args.loss_scale != 1 and args.dynamic_loss_scale:
 ###############################################################################
 # Build the model
 ###############################################################################
-
+args.data_size = tokenizer.num_tokens
 ntokens = args.data_size
 model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.tied)
 print('* number of parameters: %d' % sum([p.nelement() for p in model.parameters()]))
