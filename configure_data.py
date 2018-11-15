@@ -164,6 +164,6 @@ def configure_data(parser):
                 'data_set_type': 'supervised',
                 'seq_length': 256,
                 'eval_seq_length': 256,
-                'samples_per_shard': 10
+                'samples_per_shard': 100
                }
     return DataConfig(main_parser, defaults=defaults), parser

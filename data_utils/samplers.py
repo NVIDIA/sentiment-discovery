@@ -322,7 +322,6 @@ class DistributedBatchShardSampler(BatchShardSampler):
         local_random_batch (list): List of random states to use locally for this worker.
         world_size (int): Number of workers in distributed training.
         rank (int): Rank of this distributed worker.
-    Attributes:
         batch (list): Batch of shard queues (a list that contains shards). Call `.get` and 
             `.isdone()` on `shard_queue[0]` to get next batch and check if shard is done.
     """

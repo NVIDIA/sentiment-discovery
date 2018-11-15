@@ -254,8 +254,8 @@ def train(epoch, model, optim, train_data, LR, LR_Warmer, criterion, args, total
     #final logging
     elapsed_iters = max_iters % args.log_interval
     if elapsed_iters == 0:
-        elapsed_iters = args.log_interval
-    cur_loss = total_loss[0] / elapsed_iters
+        return cur_loss, skipped_iters
+
     cur_time = time.time()
     elapsed = cur_time - start_time
     total_elapsed = cur_time - t0 + elapsed_time

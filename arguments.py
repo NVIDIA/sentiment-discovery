@@ -113,6 +113,7 @@ def add_transformer_args(parser):
                         help='dropout probability for attention weights -- transformer only')
     group.add_argument('--relu-dropout', type=float, default=0.1,
                         help='dropout probability after ReLU in FFN -- transformer only')
+    #ignore the encoder args for transformer. That's meant for seq2seq transformer
     group.add_argument('--encoder-embed-path', type=str, default=None,
                         help='path to pre-trained encoder embedding')
     group.add_argument('--encoder-embed-dim', type=int, default=64, # originally 512 but 64 for char level

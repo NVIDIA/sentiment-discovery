@@ -174,11 +174,15 @@ def write_corpus_as_lines(dataset, filepath):
     with open(filepath, 'w') as f:
         for entry in dataset:
             lines = entry.strip().split('\n')
-            total_sentence_count += len(lines)
             for line in lines:
-                maxlen = max(len(line), maxlen)
-                f.write(line+'\n')
+                sentences = line.split('.')
+                total_sentence_count += len(sentences)
+                for sentence in sentences:
+                    maxlen = max(len(line), maxlen)
+                    f.write(sentence+'.\n')
     return total_sentence_count, maxlen
+
+MAX_SENTENCEPIECE_SENTENCES = 100000000
 
 class SentencePieceTokenizer(Tokenizer):
     def __init__(self, model_type='bpe', vocab_size=None, corpus=None, model_path=None, character_coverage=1.0, pad_token=0, **kwargs):
@@ -222,13 +226,14 @@ class SentencePieceTokenizer(Tokenizer):
         input_path = use_model_path+'.txt.'+random_hash
         print('Writing temporary dataset for tokenization to '+input_path)
         line_count, maxlenline = write_corpus_as_lines(corpus, input_path)
+        line_count = min(line_count, MAX_SENTENCEPIECE_SENTENCES)
         print('Training sentencepiece model')
         train_string = '--input={file_path} --model_prefix={model_prefix} --vocab_size={vocab_size}' \
-            + ' --model_type={model_type} --input_sentence_size={input_sentence_size} --character_coverage={character_coverage} ' #\
-            # + '--max_sentence_length={max_len}'
+            + ' --model_type={model_type} --input_sentence_size={input_sentence_size} --character_coverage={character_coverage} ' \
+            + '--max_sentence_length={max_len}'
         train_string = train_string.format(file_path=input_path, model_prefix=use_model_path, vocab_size=num_text_tokens,
-                            model_type=self.model_type, input_sentence_size=int(line_count), character_coverage=self.character_coverage)#,
-                            # max_len=str(maxlenline))
+                            model_type=self.model_type, input_sentence_size=int(line_count), character_coverage=self.character_coverage,#)#,
+                            max_len=str(maxlenline))
         spm.SentencePieceTrainer.Train(train_string)
         os.remove(input_path)
         self.spm_model = use_model_path+'.model'

@@ -17,7 +17,7 @@ class TransformerModel(nn.Module):
         encoder_out = self.encoder(src_tokens)
         decoder_out, attn = self.decoder(src_tokens, encoder_out)
         if get_attention:
-            return decoder_out, attention
+            return decoder_out, attn
         return decoder_out
 
     def max_positions(self):
@@ -229,13 +229,6 @@ class TransformerDecoder(nn.Module):
         embed_dim = embed_tokens.embedding_dim
         padding_idx = embed_tokens.padding_idx
 
-        if hasattr(args, 'mos') and (args.mos or args.mos_reduce_dim is not None):
-            assert not args.use_final_embed
-            self.mos_layer = MixtureOfSoftmax(
-                input_size=embed_dim, output_size=num_tokens, reduce_dim_size=args.mos_reduce_dim,
-                num_experts=args.mos_num_experts, dropout=0.1, dropoutl=0.1
-            )
-
         self.use_final_embed = args.use_final_embed
         self.embed_tokens = embed_tokens
         self.embed_scale = math.sqrt(embed_dim)
@@ -255,16 +248,9 @@ class TransformerDecoder(nn.Module):
             self.embed_out = nn.Parameter(torch.Tensor(num_tokens, embed_dim))
             nn.init.normal_(self.embed_out, mean=0, std=embed_dim ** -0.5)
 
-    def forward(self, prev_output_tokens, encoder_out, incremental_state=None, **kwargs):
+    def forward(self, prev_output_tokens, encoder_out, **kwargs):
         # embed positions
-        positions = self.embed_positions(
-            prev_output_tokens,
-            incremental_state=incremental_state,
-        )
-
-        if incremental_state is not None:
-            prev_output_tokens = prev_output_tokens[:, -1:]
-            positions = positions[:, -1:]
+        positions = self.embed_positions(prev_output_tokens)
 
         # embed tokens and positions
         x = self.embed_scale * self.embed_tokens(prev_output_tokens)
@@ -279,8 +265,7 @@ class TransformerDecoder(nn.Module):
             x, attn = layer(
                 x,
                 encoder_out['encoder_out'],
-                encoder_out['encoder_padding_mask'],
-                incremental_state,
+                encoder_out['encoder_padding_mask']
             )
 
         # T x B x C -> B x T x C
@@ -290,10 +275,7 @@ class TransformerDecoder(nn.Module):
         if self.share_input_output_embed:
             x = F.linear(x, self.embed_tokens.weight)
         elif not self.use_final_embed:
-            if hasattr(self, 'mos_layer'):
-                x = self.mos_layer(x)
-            else:
-                x = F.linear(x, self.embed_out)
+            x = F.linear(x, self.embed_out)
 
         return x, attn
 
@@ -338,9 +320,9 @@ class TransformerDecoderLayer(nn.Module):
         )
         self.fc1 = Linear(self.embed_dim, args.decoder_ffn_embed_dim)
         self.fc2 = Linear(args.decoder_ffn_embed_dim, self.embed_dim)
-        self.layer_norms = nn.ModuleList([LayerNorm(self.embed_dim) for i in range(3)])
+        self.layer_norms = nn.ModuleList([LayerNorm(self.embed_dim) for i in range(2)])
 
-    def forward(self, x, encoder_out, encoder_padding_mask, incremental_state):
+    def forward(self, x, encoder_out, encoder_padding_mask):
         residual = x
         x = self.maybe_layer_norm(0, x, before=True)
         x, attn = self.self_attn(
@@ -348,35 +330,21 @@ class TransformerDecoderLayer(nn.Module):
             key=x,
             value=x,
             mask_future_timesteps=True,
-            incremental_state=incremental_state,
             need_weights=False,
         )
         x = F.dropout(x, p=self.dropout, training=self.training)
         x = residual + x
         x = self.maybe_layer_norm(0, x, after=True)
 
-       # residual = x
-       # x = self.maybe_layer_norm(1, x, before=True)
-       # x, attn = self.encoder_attn(
-       #     query=x,
-       #     key=encoder_out,
-       #     value=encoder_out,
-       #     key_padding_mask=encoder_padding_mask,
-       #     incremental_state=incremental_state,
-       #     static_kv=True,
-       # )
-       # x = F.dropout(x, p=self.dropout, training=self.training)
-       # x = residual + x
-       # x = self.maybe_layer_norm(1, x, after=True)
 
         residual = x
-        x = self.maybe_layer_norm(2, x, before=True)
+        x = self.maybe_layer_norm(1, x, before=True)
         x = self.GeLU(self.fc1(x))
         x = F.dropout(x, p=self.relu_dropout, training=self.training)
         x = self.fc2(x)
         x = F.dropout(x, p=self.dropout, training=self.training)
         x = residual + x
-        x = self.maybe_layer_norm(2, x, after=True)
+        x = self.maybe_layer_norm(1, x, after=True)
         return x, attn
 
     def maybe_layer_norm(self, i, x, before=False, after=False):
