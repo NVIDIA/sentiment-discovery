@@ -80,7 +80,7 @@ def add_unsupervised_data_args(parser):
 
 def add_model_args(parser):
     args, _ = parser.parse_known_args()
-    if args.model.lower() == 'transformer':
+    if args.model.lower() == 'transformer' or args.model.lower() == 'bert':
         return add_transformer_args(parser) 
     else:
         return add_recurrent_args(parser)
@@ -149,18 +149,42 @@ def add_transformer_args(parser):
                              ' (requires shared dictionary and embed dim)')
     group.add_argument('--use-final-embed', action='store_true',
                         help='whether to use the final timestep embeddings as output of transformer (in classification)')
+    parser.add_argument('--get-hidden', action='store_true',
+                    help='whether to use the hidden state (as opposed to cell state) as features for recurrent classifier')
     return parser
 
-def add_classifier_args(parser):
+def add_sentiment_transfer_args(parser):
+    data_config, data_parser = configure_data(parser)
+    data_parser.set_defaults(split='1.', data='data/binary_sst/train.csv')
+    data_parser.set_defaults(valid='data/binary_sst/val.csv', test='data/binary_sst/test.csv')
+    group = parser.add_argument_group('sentiment_transfer', 'arguments used for sentiment_transfer script')
+    group.add_argument('--mcc', action='store_true',
+                        help='whether to use the matthews correlation coefficient as a measure of accuracy (for CoLA)')
+    group.add_argument('--num-hidden-warmup', type=int, default=0,
+                        help='number of times to conduct warmup passes through inputs to be used for transfer tasks')
+    group.add_argument('--save_results', type=str,  default='sentiment',
+                        help='path to save intermediate and final results of transfer')
+    group.add_argument('--no_test_eval', action='store_true',
+                        help='whether to not evaluate the test model (useful when your test set has no labels)')
+    group.add_argument('--write_results', default='',
+                        help='write results of model on test (or train if none is specified) data to specified filepath [only supported for csv datasets currently]')
+    group.add_argument('--use_cached', action='store_true',
+                        help='reuse cached featurizations from a previous from last time')
+    group.add_argument('--drop_neurons', action='store_true',
+                        help='drop top neurons instead of keeping them')
+
+    return data_config, data_parser, group, parser
+
+def add_classifier_model_args(parser):
     group = parser.add_argument_group('finetune', 'arguments used in training a classifier on top of a language model')
     group.add_argument('--classifier-hidden-layers', default=None, nargs='+',
                         help='sizes of hidden layers for binary classifier on top of language model, so excluding the input layer and final "1"')
-    group.add_argument('--classifier-hidden-activation', type=str, default='ReLU',
-                        help='NOTE: Unused [defaults to ReLU] activations used in hidden layers of MLP classifier (ReLU, Tanh, torch.nn module names)')
+    group.add_argument('--classifier-hidden-activation', type=str, default='PReLU',
+                        help='[defaults to PReLU] activations used in hidden layers of MLP classifier (ReLU, Tanh, torch.nn module names)')
     group.add_argument('--classifier-dropout', type=float, default=0.1,
                         help='Dropout in layers of MLP classifier')
-    group.add_argument('--use-logreg', action='store_true',
-                        help='if more than one layer is used, extract features from all layers, not just the last layer')
+    # group.add_argument('--use-logreg', action='store_true',
+    #                     help='if more than one layer is used, extract features from all layers, not just the last layer')
     group.add_argument('--all_layers', action='store_true',
                         help='if more than one layer is used, extract features from all layers, not just the last layer')
     group.add_argument('--concat-max', action='store_true',
@@ -169,32 +193,18 @@ def add_classifier_args(parser):
                         help='whether to concatenate min pools onto cell/hidden states of RNNFeaturizer')
     group.add_argument('--concat-mean', action='store_true',
                         help='whether to concatenate mean pools onto cell/hidden states of RNNFeaturizer')
-    group.add_argument('--num-hidden-warmup', type=int, default=0,
-                        help='number of times to conduct warmup passes through inputs to be used for transfer tasks')
-    group.add_argument('--mcc', action='store_true',
-                        help='whether to use the matthews correlation coefficient as a measure of accuracy (for CoLA)')
     group.add_argument('--get-hidden', action='store_true',
                         help='whether to use the hidden state (as opposed to cell state) as features for classifier')
     group.add_argument('--stlr-cut-frac', type=float, default=None,
                         help='what proportion of iterations to peak the slanted triangular learning rate')
     group.add_argument('--cos-cut-frac', type=float, default=None,
                         help='what proportion of iterations to peak the cosine learning rate')
-    group.add_argument('--save_results', type=str,  default='sentiment',
-                        help='path to save intermediate and final results of transfer')
     group.add_argument('--neurons', default=1, type=int,
                         help='number of nenurons to extract as features')
-    group.add_argument('--no_test_eval', action='store_true',
-                        help='whether to not evaluate the test model (useful when your test set has no labels)')
-    group.add_argument('--write_results', default='',
-                        help='write results of model on test (or train if none is specified) data to specified filepath [only supported for csv datasets currently]')
     group.add_argument('--lr-decay', type=float, default=1.0,
                         help='amount to multiply lr by to decay every epoch')
     group.add_argument('--momentum', type=float, default=0.0,
                         help='momentum for SGD')
-    group.add_argument('--use_cached', action='store_true',
-                        help='reuse cached featurizations from a previous from last time')
-    group.add_argument('--drop_neurons', action='store_true',
-                        help='drop top neurons instead of keeping them')
     group.add_argument('--weight-decay', type=float, default=0,
                         help='weight decay for MLP optimization')
     group.add_argument('--freeze-lm', action='store_true',

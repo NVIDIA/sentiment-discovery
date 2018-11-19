@@ -44,6 +44,8 @@ def make_dataset(path, seq_length, text_key, label_key, lazy=False, process_fn=p
             text = get_dataset(path_, text_key=text_key, label_key=label_key, binarize_sent=binarize_sent,
                     delim=delim, drop_unlabeled=drop_unlabeled, loose_json=loose, preprocess_fn=process_fn)
         return text
+    if isinstance(path, str):
+        path = [path]
     datasets = [get_dataset_from_path(p) for p in path]
     if len(datasets) == 1:
         ds = datasets[0]
@@ -54,5 +56,5 @@ def make_dataset(path, seq_length, text_key, label_key, lazy=False, process_fn=p
                                     pad_token, character_converage)
     ds.SetTokenizer(tokenizer)
     if should_split(split):
-        ds = split_ds(ds)
+        ds = split_ds(ds, split)
     return ds, tokenizer

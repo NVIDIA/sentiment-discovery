@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .transformer_utils import *
+import torch.utils.checkpoint as checkpoint
 
 class TransformerModel(nn.Module):
     """Base class for encoder-decoder models."""
@@ -229,6 +230,13 @@ class TransformerDecoder(nn.Module):
         embed_dim = embed_tokens.embedding_dim
         padding_idx = embed_tokens.padding_idx
 
+        if hasattr(args, 'mos') and (args.mos or args.mos_reduce_dim is not None):
+            assert not args.use_final_embed
+            self.mos_layer = MixtureOfSoftmax(
+                input_size=embed_dim, output_size=num_tokens, reduce_dim_size=args.mos_reduce_dim,
+                num_experts=args.mos_num_experts, dropout=0.1, dropoutl=0.1
+            )
+
         self.use_final_embed = args.use_final_embed
         self.embed_tokens = embed_tokens
         self.embed_scale = math.sqrt(embed_dim)
@@ -248,9 +256,16 @@ class TransformerDecoder(nn.Module):
             self.embed_out = nn.Parameter(torch.Tensor(num_tokens, embed_dim))
             nn.init.normal_(self.embed_out, mean=0, std=embed_dim ** -0.5)
 
-    def forward(self, prev_output_tokens, encoder_out, **kwargs):
+    def forward(self, prev_output_tokens, encoder_out, incremental_state=None, **kwargs):
         # embed positions
-        positions = self.embed_positions(prev_output_tokens)
+        positions = self.embed_positions(
+            prev_output_tokens,
+            incremental_state=incremental_state,
+        )
+
+        if incremental_state is not None:
+            prev_output_tokens = prev_output_tokens[:, -1:]
+            positions = positions[:, -1:]
 
         # embed tokens and positions
         x = self.embed_scale * self.embed_tokens(prev_output_tokens)
@@ -260,13 +275,34 @@ class TransformerDecoder(nn.Module):
         # B x T x C -> T x B x C
         #x = x.transpose(0, 1)
 
-        # decoder layers
-        for layer in self.layers:
-            x, attn = layer(
-                x,
-                encoder_out['encoder_out'],
-                encoder_out['encoder_padding_mask']
-            )
+        def custom(start, end):
+            def custom_forward(*inputs):
+                layers = self.layers[start:end]
+                x_ = inputs[0]
+                for layer in layers:
+                    x_, attn = layer(x_, inputs[1], None, None)
+                return x_
+            return custom_forward
+
+        grad_chkpt = True
+        if self.training and grad_chkpt:
+            l = 0
+            num_layers = len(self.layers)
+            chunk_length = math.ceil(math.sqrt(num_layers))
+            while l < num_layers:
+                x = checkpoint.checkpoint(custom(l, l+chunk_length), x, encoder_out['encoder_out']*1)#torch.autograd.Variable(torch.ones_like(encoder_out['encoder_out'])))
+                l += chunk_length
+            attn = None
+            # decoder layers
+        else:
+            for layer in self.layers:
+                x, attn = layer(
+                    x,
+                    encoder_out['encoder_out'],
+                    encoder_out['encoder_padding_mask'],
+                    incremental_state,
+                )
+
 
         # T x B x C -> B x T x C
         #x = x.transpose(0, 1)
@@ -275,7 +311,10 @@ class TransformerDecoder(nn.Module):
         if self.share_input_output_embed:
             x = F.linear(x, self.embed_tokens.weight)
         elif not self.use_final_embed:
-            x = F.linear(x, self.embed_out)
+            if hasattr(self, 'mos_layer'):
+                x = self.mos_layer(x)
+            else:
+                x = F.linear(x, self.embed_out)
 
         return x, attn
 
@@ -322,7 +361,7 @@ class TransformerDecoderLayer(nn.Module):
         self.fc2 = Linear(args.decoder_ffn_embed_dim, self.embed_dim)
         self.layer_norms = nn.ModuleList([LayerNorm(self.embed_dim) for i in range(2)])
 
-    def forward(self, x, encoder_out, encoder_padding_mask):
+    def forward(self, x, encoder_out, encoder_padding_mask, incremental_state):
         residual = x
         x = self.maybe_layer_norm(0, x, before=True)
         x, attn = self.self_attn(
@@ -330,12 +369,12 @@ class TransformerDecoderLayer(nn.Module):
             key=x,
             value=x,
             mask_future_timesteps=True,
+            incremental_state=incremental_state,
             need_weights=False,
         )
         x = F.dropout(x, p=self.dropout, training=self.training)
         x = residual + x
         x = self.maybe_layer_norm(0, x, after=True)
-
 
         residual = x
         x = self.maybe_layer_norm(1, x, before=True)

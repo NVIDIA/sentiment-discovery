@@ -4,6 +4,9 @@ import os
 import sys
 import time
 import math
+import random
+
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
@@ -27,6 +30,8 @@ def setup_model_and_optim(args, train_data, tokenizer):
         embed_tokens = m.Embedding(ntokens, args.decoder_embed_dim, padding_idx=tokenizer.command_name_map['pad'].Id)
         model = m.TransformerModel(m.DecoderPreprocessor(args, embed_tokens),
                                     m.TransformerDecoder(args, embed_tokens))
+    elif args.model.lower() == 'bert':
+        model = m.BERTModel(args)
     else:
         model = m.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.tied)
         global rnn_model
@@ -77,6 +82,7 @@ def setup_model_and_optim(args, train_data, tokenizer):
 
         init_step = -1
         if args.load_optim:
+            #TODO: this no longer makes sense given the new data loaders
             init_step = optim_sd['iter']-optim_sd['skipped_iter']
             train_data.batch_sampler.start_iter = (optim_sd['iter'] % len(train_data)) + 1
 
@@ -129,7 +135,7 @@ def init_hidden(args):
     if rnn_model is not None:
         rnn_model.rnn.init_hidden(args.batch_size)
 
-def evaluate(data_source, model, args):
+def evaluate(data_source, model, criterion, args):
     # Turn on evaluation mode which disables dropout.
     model.eval()
     init_hidden(args)
@@ -143,14 +149,17 @@ def evaluate(data_source, model, args):
             batch = next(data_iter)
             data, targets, reset_mask, padding_mask = get_batch(batch, args)
 
-            output, hidden = model(data)
+            output, hidden = model(data, reset_mask=reset_mask)
             losses = criterion(output.view(-1, ntokens).contiguous().float(), targets.view(-1).contiguous())
-            loss = losses * torch.mean(losses * (padding_mask.float()))
+            padding_mask = padding_mask.view(-1)
+            portion_unpadded = padding_mask.sum() / padding_mask.size(0)
+            loss = portion_unpadded * torch.mean(losses * (padding_mask.view(-1).float()))
             if isinstance(model, DDP):
                 torch.distributed.all_reduce(loss.data)
                 loss.data /= args.world_size
-            total_loss += loss.data[0]
-    return total_loss / max(len(data_source), 1)
+            total_loss += loss.data.float()
+            i+=1
+    return total_loss / max_iters
 
 def train(epoch, model, optim, train_data, LR, LR_Warmer, criterion, args, total_iters=0, skipped_iters=0, elapsed_time=False):
     # Turn on training mode which enables dropout.
@@ -268,8 +277,8 @@ def train(epoch, model, optim, train_data, LR, LR_Warmer, criterion, args, total
 def main():
     parser = argparse.ArgumentParser(description='PyTorch Sentiment-Discovery Language Modeling')
     parser = add_general_args(parser)
-    paser = add_model_args(parser)
-    data_config, parser = add_unsupervised_data_args(parser)
+    parser = add_model_args(parser)
+    data_config, data_parser = add_unsupervised_data_args(parser)
     args = parser.parse_args()
 
     torch.backends.cudnn.enabled = False
@@ -284,7 +293,9 @@ def main():
         torch.distributed.init_process_group(backend=args.distributed_backend, world_size=args.world_size,
                                              init_method='tcp://localhost:6000', rank=args.rank)
     # Set the random seed manually for reproducibility.
-    if args.seed > 0:
+    if args.seed is not None and args.seed > 0:
+        random.seed(args.seed)
+        np.random.seed(args.seed)
         torch.manual_seed(args.seed)
         if args.cuda:
             torch.cuda.manual_seed(args.seed)
@@ -320,10 +331,10 @@ def main():
             val_loss, skipped_iters = train(epoch, model, optim, train_data, LR, LR_Warmer, criterion,
                                             args, total_iters, skipped_iters, elapsed_time)
             elapsed_time += time.time() - epoch_start_time
-            total_iters += len(train_data)
+            total_iters += args.train_iters
             if val_data is not None:
                 print('entering eval')
-                val_loss = evaluate(val_data)
+                val_loss = evaluate(val_data, model, criterion, args)
             print('-' * 89)
             print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
                   'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
@@ -333,7 +344,7 @@ def main():
             if not best_val_loss or val_loss < best_val_loss and args.rank <= 0:
                 torch.save(model.state_dict(), args.save)
                 best_val_loss = val_loss
-            if torch.distributed.get_rank() == 0:
+            if args.world_size == 1 or torch.distributed.get_rank() == 0:
                 os.remove(args.save+'.train_lock')
             if args.world_size > 1:
                 torch.distributed.barrier()
@@ -358,10 +369,11 @@ def main():
 
     if test_data is not None:
         # Run on test data.
-        test_loss = evaluate(test_data)
+        print('entering test')
+        test_loss = evaluate(test_data, model, criterion, args)
         print('=' * 89)
         print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
-            test_loss, math.exp(test_loss)))
+            test_loss, math.exp(min(test_loss, 20))))
         print('=' * 89)
 
 if __name__ == "__main__":

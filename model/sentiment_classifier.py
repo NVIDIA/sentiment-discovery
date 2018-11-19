@@ -3,7 +3,9 @@ from torch import nn
 import torch.nn.functional as F
 
 import numpy as np
-from model import RNNFeaturizer
+from itertools import chain
+from model import RNNFeaturizer, TransformerFeaturizer
+from .transformer_utils import GeLU
 
 class BinaryClassifier(nn.Module):
     def __init__(self, num_features=4096):
@@ -11,6 +13,8 @@ class BinaryClassifier(nn.Module):
 
         self.dense0 = nn.Linear(num_features, 1)
         self.neurons = None
+        self.final = 1
+        print('init BinaryClassifier with %d features' % num_features)
 
     def forward(self, X, **kwargs):
         return torch.sigmoid(self.linear(X)).float()
@@ -58,25 +62,107 @@ class BinaryClassifier(nn.Module):
 
         self.dense0.load_state_dict(sd, strict=strict)
 
+NONLINEARITY_MAP = {
+    'prelu': nn.PReLU,
+    'relu': nn.ReLU,
+    'elu': nn.ELU,
+    'selu': nn.SELU,
+    'leaky': nn.LeakyReLU,
+    'gelu': GeLU
+}
+
+class MultiLayerBinaryClassifier(nn.Module):
+    def __init__(self, input_layer_size, layer_sizes, dropout=0.1, init_dropout=True, heads_per_class=1, nonlinearity='PReLU', softmax=False):
+        super().__init__()
+        if heads_per_class > 1:
+            print('Using multiple heads per class: %d' % heads_per_class)
+            print(layer_sizes[-1])
+            layer_sizes[-1] = int(layer_sizes[-1]) * heads_per_class
+        self.neurons = None
+        self.layer_sizes = [input_layer_size] + list(map(int, layer_sizes))
+        self.final = self.layer_sizes[-1]
+        self.dropout = dropout
+        assert nonlinearity.lower() in NONLINEARITY_MAP
+        self.nonlinearity = NONLINEARITY_MAP[nonlinearity.lower()]()
+        # layer_sizes are sizes of the input and hidden layers, so the final 1 is assumed.
+        layer_list = []
+        # Since we recieve input from the Transformer bottleneck... it may make sense to dropout on that input first
+        if init_dropout:
+            layer_list.extend([nn.Dropout(p=self.dropout)])
+        layer_list.extend(list(chain.from_iterable(
+            [[nn.Linear(self.layer_sizes[i], self.layer_sizes[i+1]), self.nonlinearity, nn.Dropout(p=self.dropout)] for i in range(len(self.layer_sizes) - 2)]
+        )))
+        self.final_layer = nn.Linear(*self.layer_sizes[-2:])
+        extend_list = [self.final_layer]
+        if not softmax:
+            extend_list += [nn.Sigmoid()]
+        layer_list.extend(extend_list)
+
+        self.model = nn.Sequential(*layer_list)
+        self.neurons = None
+
+        print('init MultiLayerBinaryClassifier with layers %s and dropout %s' % (self.layer_sizes, self.dropout))
+
+    def forward(self, X, **kwargs):
+        return (self.model(X).float())
+
+    # HACK -- parameter to measure *variation* between last layer of the MLP.
+    # Why? To support multihead -- for the same category, where we want multiple heads to predict with different functions
+    # (similar to training a mixture of models) -- useful for uncertainty sampling
+    def get_last_layer_variance(self):
+        final_layer_weight = self.final_layer.weight
+        fl_norm = torch.norm(final_layer_weight,2,1)
+        final_layer_weight = final_layer_weight * (1.0 / fl_norm).unsqueeze(1)
+        final_layer_dot = final_layer_weight @ torch.transpose(final_layer_weight, 0, 1)
+        # Compute matrix of all NxN layers -- in normalized form
+        final_layer_dot_loss = (torch.norm(final_layer_dot,2,1) - 1.)
+        final_layer_dot_loss = final_layer_dot_loss/(self.final_layer.weight.shape[0]+0.00001)
+        final_layer_dot_loss = torch.sum(final_layer_dot_loss)
+        # Return the average loss -- per dot comparison.
+        return final_layer_dot_loss 
+
+    def get_neurons(self, *args, **kwargs):
+        return None
+
+    def set_neurons(self, *args, **kwargs):
+        return None       
 
 class SentimentClassifier(nn.Module):
     """Container module with an encoder, a recurrent module, and a decoder."""
 
-    def __init__(self, rnn_type, ntoken, ninp, nhid, nlayers, dropout=0.5, all_layers=False):
+    def __init__(self, model_type, ntoken, ninp, nhid, nlayers, classifier_hidden_layers=None, dropout=0.5, all_layers=False, concat_pools=[False] * 3, args=None):
         super().__init__()
-        self.encoder = RNNFeaturizer(rnn_type, ntoken, ninp, nhid, nlayers, dropout=dropout, all_layers=all_layers)
-        self.classifier = BinaryClassifier(num_features=self.encoder.output_size)
+        self.model_type = model_type
+        self.using_logreg = args.use_logreg
+        if model_type == 'transformer':
+            self.encoder = TransformerFeaturizer(args)
+            out_size = args.decoder_embed_dim
+        else:
+            # NOTE: Dropout is for Classifier. Add separate RNN dropout or via params, if needed.
+            self.encoder = RNNFeaturizer(model_type, ntoken, ninp, nhid, nlayers, dropout=0.0, all_layers=all_layers,
+                                         concat_pools=concat_pools, args=args)
+            out_size = self.encoder.output_size
+        self.encoder_dim = out_size
 
+        if classifier_hidden_layers is None:
+            self.classifier = BinaryClassifier(num_features=self.encoder_dim)
+        else:
+            self.classifier = MultiLayerBinaryClassifier(self.encoder_dim, classifier_hidden_layers, dropout=dropout, heads_per_class=args.heads_per_class, softmax=args.use_softmax)
+        self.out_dim = self.classifier.final
         self.neurons_ = None
+        # If we want to output multiple heads, and average the output
+        self.heads_per_class = args.heads_per_class
 
-    def forward(self, input, seq_len=None, get_hidden=False):
-        self.encoder.rnn.reset_hidden(input.size(1))
-        hidden = self.encoder(input, seq_len=seq_len, get_hidden=get_hidden)
+    def forward(self, input, prev_output_tokens=None, seq_len=None, get_hidden=False):
+        hidden, lm_out = self.encoder(input, seq_len, get_hidden)
         if get_hidden:
             hidden = hidden[0]
         if self.neurons is not None:
             hidden = hidden[:, self.neurons].contiguous()
-        return self.classifier(hidden)
+        classifier_in = hidden
+        class_out = self.classifier(classifier_in)
+
+        return class_out, (lm_out, classifier_in)
 
     def state_dict(self, destination=None, prefix='', keep_vars=False):
         sd = {}

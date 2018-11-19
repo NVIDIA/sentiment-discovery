@@ -75,10 +75,10 @@ def make_loaders(opt):
 
     if opt.valid is not None:
         eval_set_args['path'] = opt.valid
-        valid = data_utils.make_dataset(**eval_set_args)
+        valid, _ = data_utils.make_dataset(**eval_set_args)
     if test is None and opt.test is not None:
         eval_set_args['path'] = opt.test
-        test = data_utils.make_dataset(**eval_set_args)
+        test, _ = data_utils.make_dataset(**eval_set_args)
 
 
     if train is not None and opt.batch_size > 0:
