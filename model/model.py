@@ -35,7 +35,7 @@ class RNNModel(nn.Module):
         self.nhid = nhid
         self.nlayers = nlayers
 
-    def forward(self, input, reset_mask=None):
+    def forward(self, input, reset_mask=None, chkpt_grad=False, **kwargs):
         emb = self.drop(self.encoder(input))
         self.rnn.detach_hidden()
 
@@ -62,7 +62,7 @@ class RNNModel(nn.Module):
 class RNNFeaturizer(nn.Module):
     """Container module with an encoder, a recurrent module, and a decoder."""
 
-    def __init__(self, rnn_type, ntoken, ninp, nhid, nlayers, dropout=0.5, all_layers=False, concat_pools=[False] * 3, hidden_warmup=False, residuals=False, args=None):
+    def __init__(self, rnn_type, ntoken, ninp, nhid, nlayers, dropout=0.5, all_layers=False, concat_pools=[False] * 3, hidden_warmup=False, residuals=False, get_lm_out=False):
         super(RNNFeaturizer, self).__init__()
         self.drop = nn.Dropout(dropout)
         self.encoder = nn.Embedding(ntoken, ninp)
@@ -74,7 +74,7 @@ class RNNFeaturizer(nn.Module):
         self.nlayers = nlayers
         self.all_layers = all_layers
         self.hidden_warmup = hidden_warmup
-        self.aux_lm_loss = args.aux_lm_loss
+        self.aux_lm_loss = get_lm_out
         if self.aux_lm_loss:
             self.decoder = nn.Linear(nhid, ntoken)
             self.decoder.load_state_dict(torch.load(open(args.load, 'rb'))['decoder'])
@@ -82,7 +82,7 @@ class RNNFeaturizer(nn.Module):
         self.output_size = self.nhid if not self.all_layers else self.nhid * self.nlayers
         self.output_size *= (1 + sum(concat_pools))
 
-    def forward(self, input, seq_len=None, get_hidden=False, **kwargs):
+    def forward(self, input, seq_len=None, get_hidden=False, chkpt_grad=False, **kwargs):
         if not self.hidden_warmup:
             self.rnn.reset_hidden(input.size(1))
         if self.aux_lm_loss:
@@ -90,7 +90,7 @@ class RNNFeaturizer(nn.Module):
         if seq_len is None:
             for i in range(input.size(0)):
                 emb = self.drop(self.encoder(input[i]))
-                out, hidden = self.rnn(emb.unsqueeze(0), collect_hidden=True)
+                out, hidden = self.rnn(emb.unsqueeze(0), collect_hidden=True, chkpt_grad=chkpt_grad)
                 if self.aux_lm_loss:
                     outs.append(out)
             cell = self.get_features(hidden)
@@ -199,17 +199,17 @@ class TransformerDecoderModel(nn.Module):
     def __init__(self, args):
         super().__init__()
         self._is_generation_fast = False
-        self.decoder = TransformerDecoder(args, Embedding(args.data_size, args.decoder_embed_dim, padding_idx=args.padding_idx))
+        self.encoder = TransformerDecoder(args, Embedding(args.data_size, args.decoder_embed_dim, padding_idx=args.padding_idx))
 
-    def forward(self, src_tokens, get_attention=True, **kwargs):
-        decoder_out, attn = self.decoder(src_tokens, src_tokens)
+    def forward(self, src_tokens, get_attention=True, chkpt_grad=False, **kwargs):
+        decoder_out, attn = self.encoder(src_tokens, src_tokens, chkpt_grad=chkpt_grad)
         if get_attention:
             return decoder_out, attn
         return decoder_out
 
     def max_positions(self):
         """Maximum length supported by the model."""
-        return self.decoder.max_positions()
+        return self.encoder.max_positions()
 
     def get_targets(self, sample, net_output):
         """Get targets from either the sample or the net's output."""
@@ -217,11 +217,11 @@ class TransformerDecoderModel(nn.Module):
 
     def get_normalized_probs(self, net_output, log_probs, sample=None):
         """Get normalized probabilities (or log probs) from a net's output."""
-        return self.decoder.get_normalized_probs(net_output, log_probs, sample)
+        return self.encoder.get_normalized_probs(net_output, log_probs, sample)
 
     def max_decoder_positions(self):
         """Maximum length supported by the decoder."""
-        return self.decoder.max_positions()
+        return self.encoder.max_positions()
 
     def load_state_dict(self, state_dict, strict=True):
         """Copies parameters and buffers from state_dict into this module and
@@ -272,18 +272,20 @@ class TransformerDecoderModel(nn.Module):
         self.train = train
 
 class TransformerFeaturizer(nn.Module):
-    def __init__(self, args):
+    def __init__(self, get_lm_out, args):
         super(TransformerFeaturizer, self).__init__()
         args.use_final_embed = True
-        self.encoder = TransformerDecoderModel(args.padding_idx)
-        self.aux_lm_loss = args.aux_lm_loss if hasattr(args, 'aux_lm_loss') else None
+        self.encoder = TransformerDecoderModel(args)
+        self.aux_lm_loss = get_lm_out
 
-    def forward(self, input, seq_len=None, get_hidden=False, **kwargs):
-        out = self.encoder(input, get_attention=get_hidden, **kwargs)
+    def forward(self, input, seq_len=None, get_hidden=False, chkpt_grad=False, **kwargs):
+        encoder_out = self.encoder(input, get_attention=get_hidden, chkpt_grad=chkpt_grad, **kwargs)
+        if get_hidden:
+            encoder_out = encoder_out[0]
         feats = encoder_out[seq_len.squeeze(), torch.arange(seq_len.size(0))]
         lm_out = None
         if self.aux_lm_loss:
-            lm_out = F.linear(encoder_out, self.encoder.decoder.embed_out)
+            lm_out = F.linear(encoder_out, self.encoder.encoder.embed_out)
         return out, lm_out
 
 class BERTModel(nn.Module):
@@ -292,5 +294,5 @@ class BERTModel(nn.Module):
         self.config = BertConfig(args.data_size, hidden_size=args.decoder_embed_dim, num_hidden_layers=args.decoder_layers, num_attention_heads=args.decoder_attention_heads, intermediate_size=args.decoder_ffn_embed_dim, hidden_dropout_prob=args.relu_dropout, attention_probs_dropout_prob=args.attention_dropout)
         self.encoder = BERTEncoder(self.config)
 
-    def forward(self, input_tokens, **kwargs):
-        return self.encoder(input_tokens)
+    def forward(self, input_tokens, chkpt_grad=False, **kwargs):
+        return self.encoder(input_tokens.t(), chkpt_grad=chkpt_grad)

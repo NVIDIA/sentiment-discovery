@@ -256,7 +256,7 @@ class TransformerDecoder(nn.Module):
             self.embed_out = nn.Parameter(torch.Tensor(num_tokens, embed_dim))
             nn.init.normal_(self.embed_out, mean=0, std=embed_dim ** -0.5)
 
-    def forward(self, prev_output_tokens, encoder_out, incremental_state=None, **kwargs):
+    def forward(self, prev_output_tokens, encoder_out, incremental_state=None, chkpt_grad=False, **kwargs):
         # embed positions
         positions = self.embed_positions(
             prev_output_tokens,
@@ -285,7 +285,7 @@ class TransformerDecoder(nn.Module):
             return custom_forward
 
         grad_chkpt = True
-        if self.training and grad_chkpt:
+        if self.training and chkpt_grad:
             l = 0
             num_layers = len(self.layers)
             chunk_length = math.ceil(math.sqrt(num_layers))

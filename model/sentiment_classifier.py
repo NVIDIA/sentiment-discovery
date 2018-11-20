@@ -130,17 +130,17 @@ class MultiLayerBinaryClassifier(nn.Module):
 class SentimentClassifier(nn.Module):
     """Container module with an encoder, a recurrent module, and a decoder."""
 
-    def __init__(self, model_type, ntoken, ninp, nhid, nlayers, classifier_hidden_layers=None, dropout=0.5, all_layers=False, concat_pools=[False] * 3, args=None):
+    def __init__(self, model_type, ntoken, ninp, nhid, nlayers, classifier_hidden_layers=None, dropout=0.5, all_layers=False, concat_pools=[False] * 3, get_lm_out=False, args=None):
         super().__init__()
         self.model_type = model_type
         self.using_logreg = args.use_logreg
         if model_type == 'transformer':
-            self.encoder = TransformerFeaturizer(args)
+            self.encoder = TransformerFeaturizer(get_lm_out, args)
             out_size = args.decoder_embed_dim
         else:
             # NOTE: Dropout is for Classifier. Add separate RNN dropout or via params, if needed.
             self.encoder = RNNFeaturizer(model_type, ntoken, ninp, nhid, nlayers, dropout=0.0, all_layers=all_layers,
-                                         concat_pools=concat_pools, args=args)
+                                         concat_pools=concat_pools, get_lm_out=get_lm_out)
             out_size = self.encoder.output_size
         self.encoder_dim = out_size
 
@@ -153,7 +153,7 @@ class SentimentClassifier(nn.Module):
         # If we want to output multiple heads, and average the output
         self.heads_per_class = args.heads_per_class
 
-    def forward(self, input, prev_output_tokens=None, seq_len=None, get_hidden=False):
+    def forward(self, input, seq_len=None, get_hidden=False):
         hidden, lm_out = self.encoder(input, seq_len, get_hidden)
         if get_hidden:
             hidden = hidden[0]

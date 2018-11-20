@@ -20,6 +20,7 @@ class DataConfig(object):
 
     def apply_defaults(self, opt):
         for k, v in self.defaults.items():
+            k = k.replace('-', '_')
             if not hasattr(opt, k):
                 setattr(opt, k, v)
 
@@ -123,36 +124,38 @@ def configure_data(parser):
                         help="""Filename for validation""")
     parser.add_argument('--test', nargs='*', default=None,
                         help="""Filename for testing""")
-    parser.add_argument('--batch_size', type=int, default=128,
+    parser.add_argument('--batch-size', type=int, default=128,
                         help='Data Loader batch size')
-    parser.add_argument('--eval_batch_size', type=int, default=0,
+    parser.add_argument('--eval-batch-size', type=int, default=0,
                         help='Data Loader batch size for evaluation datasets')
-    parser.add_argument('--data_size', type=int, default=256,
+    parser.add_argument('--data-size', type=int, default=256,
                         help='number of tokens in data')
-    parser.add_argument('--loose_json', action='store_true',
+    parser.add_argument('--loose-json', action='store_true',
                         help='Use loose json (one json-formatted string per newline), instead of tight json (data file is one json string)')
     parser.add_argument('--preprocess', action='store_true',
                         help='force preprocessing of datasets')
     parser.add_argument('--delim', default=',',
                         help='delimiter used to parse csv testfiles')
+    parser.add_argument('--non-binary-cols', type=str, default=None,
+                        help='path for columns to non-binary dataset')
     parser.add_argument('--split', default='1.',
                         help='comma-separated list of proportions for training, validation, and test split')
-    parser.add_argument('--text_key', default='sentence',
+    parser.add_argument('--text-key', default='sentence',
                         help='key to use to extract text from json/csv')
-    parser.add_argument('--label_key', default='label',
+    parser.add_argument('--label-key', default='label',
                         help='key to use to extract labels from json/csv')
-    parser.add_argument('--eval_text_key', default=None,
+    parser.add_argument('--eval-text-key', default=None,
                         help='key to use to extract text from json/csv evaluation datasets')
-    parser.add_argument('--eval_label_key', default=None,
+    parser.add_argument('--eval-label-key', default=None,
                         help='key to use to extract labels from json/csv evaluation datasets')
     # tokenizer arguments
-    parser.add_argument('--tokenizer_type', type=str, default='CharacterLevelTokenizer', choices=['CharacterLevelTokenizer', 'SentencePieceTokenizer'],
+    parser.add_argument('--tokenizer-type', type=str, default='CharacterLevelTokenizer', choices=['CharacterLevelTokenizer', 'SentencePieceTokenizer'],
                         help='what type of tokenizer to use')
-    parser.add_argument('--tokenizer_model_type', type=str, default='bpe', choices=['bpe', 'char', 'unigram', 'word'],
+    parser.add_argument('--tokenizer-model-type', type=str, default='bpe', choices=['bpe', 'char', 'unigram', 'word'],
                         help='Model type to use for sentencepiece tokenization')
-    parser.add_argument('--vocab_size', type=int, default=256,
+    parser.add_argument('--vocab-size', type=int, default=256,
                         help='vocab size to use for non-character-level tokenization')
-    parser.add_argument('--tokenizer_path', type=str, default='tokenizer.model',
+    parser.add_argument('--tokenizer-path', type=str, default='tokenizer.model',
                         help='path used to save/load sentencepiece tokenization models')
     defaults = {
                 'world_size': 1,
@@ -161,9 +164,9 @@ def configure_data(parser):
                 'lazy': False,
                 'shuffle': False,
                 'transpose': False,
-                'data_set_type': 'supervised',
-                'seq_length': 256,
-                'eval_seq_length': 256,
-                'samples_per_shard': 100
+                'data-set-type': 'supervised',
+                'seq-length': 256,
+                'eval-seq-length': 256,
+                'samples-per-shard': 100
                }
     return DataConfig(main_parser, defaults=defaults), parser

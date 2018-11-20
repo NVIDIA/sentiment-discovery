@@ -185,7 +185,7 @@ def train(epoch, model, optim, train_data, LR, LR_Warmer, criterion, args, total
         batch = next(data_iter)
         data, targets, reset_mask, padding_mask = get_batch(batch, args)
         optim.zero_grad()
-        output, _ = model(data, reset_mask=reset_mask)
+        output, _ = model(data, reset_mask=reset_mask, chkpt_grad=args.chkpt_grad)
 
         losses = criterion(output.view(-1, ntokens).contiguous().float(), targets.view(-1).contiguous())
         padding_mask = padding_mask.view(-1)

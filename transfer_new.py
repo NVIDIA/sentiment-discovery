@@ -50,10 +50,10 @@ def get_model(args):
     ntokens = args.data_size
     concat_pools = [args.concat_max, args.concat_min, args.concat_mean]
     if args.model.lower() == 'transformer':
-        model = TransformerFeaturizer(args)
+        model = TransformerFeaturizer(False, args)
     else:
         model = RNNFeaturizer(args.model, ntokens, args.emsize, args.nhid, args.nlayers,
-                                          0.0, args.all_layers, concat_pools, residuals=args.residuals, args=args)
+                                          0.0, args.all_layers, concat_pools, residuals=args.residuals)
     if args.cuda:
         model.cuda()
 

@@ -173,6 +173,8 @@ def write_corpus_as_lines(dataset, filepath):
     maxlen = 0
     with open(filepath, 'w') as f:
         for entry in dataset:
+            if isinstance(entry, dict):
+                entry = entry['text']
             lines = entry.strip().split('\n')
             for line in lines:
                 sentences = line.split('.')
