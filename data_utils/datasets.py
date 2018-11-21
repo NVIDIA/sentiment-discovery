@@ -220,9 +220,9 @@ class csv_dataset(data.Dataset):
         data = data.dropna(axis=0)
 
         self.X = data[text_key].values.tolist()
-        if label_key in data:
+        try:
             self.Y = data[label_key].values
-        else:
+        except:
             self.Y = np.ones(len(self.X))*-1
 
         if binarize_sent:

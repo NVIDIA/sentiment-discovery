@@ -34,7 +34,8 @@ def make_loaders(opt):
     eval_seq_length = opt.eval_seq_length
     if opt.eval_seq_length < 0:
         eval_seq_length = eval_seq_length * opt.world_size
-    data_loader_args = {'num_workers': 1, 'shuffle': opt.shuffle, 'batch_size': batch_size,
+    data_loader_args = {'num_workers': 0, 'shuffle': opt.shuffle, 'batch_size': batch_size,
+    #data_loader_args = {'num_workers': 1, 'shuffle': opt.shuffle, 'batch_size': batch_size,
                     'pin_memory': True, 'transpose': opt.transpose, 'distributed': opt.world_size > 1,
                     'rank': opt.rank, 'world_size': opt.world_size, 'drop_last': opt.world_size > 1}
     if opt.data_set_type == 'L2R':
@@ -48,7 +49,9 @@ def make_loaders(opt):
         'text_key': opt.text_key, 'label_key': opt.label_key, 'preprocess': opt.preprocess,
         'ds_type': opt.data_set_type, 'split': split, 'loose': opt.loose_json,
         'tokenizer_type': opt.tokenizer_type, 'tokenizer_model_path': opt.tokenizer_path,
-        'vocab_size': opt.vocab_size, 'model_type': opt.tokenizer_model_type}
+        'vocab_size': opt.vocab_size, 'model_type': opt.tokenizer_model_type,
+        'non_binary_cols': opt.non_binary_cols}
+
     eval_loader_args = copy.copy(data_loader_args)
     eval_set_args = copy.copy(data_set_args)
     eval_set_args['split']=[1.]
@@ -136,8 +139,8 @@ def configure_data(parser):
                         help='force preprocessing of datasets')
     parser.add_argument('--delim', default=',',
                         help='delimiter used to parse csv testfiles')
-    parser.add_argument('--non-binary-cols', type=str, default=None,
-                        help='path for columns to non-binary dataset')
+    parser.add_argument('--non-binary-cols', nargs='*', default=None,
+                        help='labels for columns to non-binary dataset [only works for csv datasets]')
     parser.add_argument('--split', default='1.',
                         help='comma-separated list of proportions for training, validation, and test split')
     parser.add_argument('--text-key', default='sentence',
@@ -164,9 +167,9 @@ def configure_data(parser):
                 'lazy': False,
                 'shuffle': False,
                 'transpose': False,
-                'data-set-type': 'supervised',
-                'seq-length': 256,
-                'eval-seq-length': 256,
-                'samples-per-shard': 100
+                'data_set_type': 'supervised',
+                'seq_length': 256,
+                'eval_seq_length': 256,
+                'samples_per_shard': 100
                }
     return DataConfig(main_parser, defaults=defaults), parser

@@ -39,20 +39,18 @@ def add_general_args(parser):
                         help='Static loss scaling, positive power of 2 values can improve fp16 convergence.')
     group.add_argument('--world-size', type=int, default=1,
                         help='number of distributed workers')
-    group.add_argument('--distributed_backend', default='gloo',
+    group.add_argument('--distributed-backend', default='gloo',
                         help='which backend to use for distributed training. One of [gloo, nccl]')
     group.add_argument('--rank', type=int, default=-1,
                         help='distributed worker rank. Typically set automatically from multiproc.py')
     group.add_argument('--optim', default='Adam',
                         help='One of PyTorch\'s optimizers (Adam, SGD, etc). Default: Adam')
-    group.add_argument('--LARC', action='store_true',
-                        help='use LARC optimizer. (not working with FP16)')
-    group.add_argument('--trust-coeff', type=float, default=.02,
-                        help='trust coefficient value for LARC optimizer')
     group.add_argument('--chkpt-grad', action='store_true',
                         help='checkpoint gradients to allow for training with larger models and sequences')
     group.add_argument('--ids', action='store_true',
                         help='specify that the data is formatted as ids')
+    group.add_argument('--multinode-init', action='store_true',
+                        help='initialize multinode. Environment variables should be set as according to https://pytorch.org/docs/stable/distributed.html')
     
     return parser
 
@@ -88,6 +86,8 @@ def add_model_args(parser):
 
 def add_recurrent_args(parser):
     group = parser.add_argument_group('recurrent', 'arguments for building recurrent nets')
+    group.add_argument('--num-hidden-warmup', type=int, default=0,
+                        help='number of times to conduct hidden state warmup passes through inputs to be used for transfer tasks')
     group.add_argument('--emsize', type=int, default=64,
                         help='size of word embeddings')
     group.add_argument('--nhid', type=int, default=4096,
@@ -164,7 +164,7 @@ def add_classifier_model_args(parser):
                         help='Dropout in layers of MLP classifier')
     # group.add_argument('--use-logreg', action='store_true',
     #                     help='if more than one layer is used, extract features from all layers, not just the last layer')
-    group.add_argument('--all_layers', action='store_true',
+    group.add_argument('--all-layers', action='store_true',
                         help='if more than one layer is used, extract features from all layers, not just the last layer')
     group.add_argument('--concat-max', action='store_true',
                         help='whether to concatenate max pools onto cell/hidden states of RNNFeaturizer')
@@ -185,19 +185,17 @@ def add_classifier_model_args(parser):
 
 def add_sentiment_transfer_args(parser):
     data_config, data_parser = configure_data(parser)
-    data_parser.set_defaults(split='1.', data='data/binary_sst/train.csv')
-    data_parser.set_defaults(valid='data/binary_sst/val.csv', test='data/binary_sst/test.csv')
+    data_parser.set_defaults(split='1.', data=['data/binary_sst/train.csv'])
+    data_parser.set_defaults(valid=['data/binary_sst/val.csv'], test=['data/binary_sst/test.csv'])
     group = parser.add_argument_group('sentiment_transfer', 'arguments used for sentiment_transfer script')
     group.add_argument('--mcc', action='store_true',
                         help='whether to use the matthews correlation coefficient as a measure of accuracy (for CoLA)')
-    group.add_argument('--num-hidden-warmup', type=int, default=0,
-                        help='number of times to conduct hidden state warmup passes through inputs to be used for transfer tasks')
     group.add_argument('--save-results', type=str,  default='sentiment',
                         help='path to save intermediate and final results of transfer')
     group.add_argument('--no-test-eval', action='store_true',
                         help='whether to not evaluate the test model (useful when your test set has no labels)')
-    group.add_argument('--write-results', default='',
-                        help='write results of model on test (or train if none is specified) data to specified filepath [only supported for csv datasets currently]')
+    group.add_argument('--write-results', type=str, default='',
+                        help='write results of model on test (or train if none is specified) data to specified filepath ')
     group.add_argument('--use-cached', action='store_true',
                         help='reuse cached featurizations from a previous from last time')
     group.add_argument('--drop-neurons', action='store_true',
@@ -206,6 +204,16 @@ def add_sentiment_transfer_args(parser):
     return data_config, data_parser, group, parser
 
 def add_run_classifier_args(parser):
+    data_config, data_group = configure_data(parser)
+    data_group.set_defaults(split='1.', data=['data/binary_sst/train.csv'])
+    data_group.set_defaults(shuffle=False)
+    group = parser.add_argument_group('run_classifier', 'arguments used for run classifier script')
+    group.add_argument('--save_probs', type=str,  default='clf_results.npy',
+                        help='path to save numpy of predicted probabilities')
+    group.add_argument('--write-results', type=str, default='',
+                        help='path to location for CSV -- write results of model on data \
+                             input strings + results and variances. Will not write if empty') 
+    return data_config, data_parser, group, parser
 
 def add_finetune_classifier_args(parser):
     data_config, data_group = configure_data(parser)
@@ -213,8 +221,8 @@ def add_finetune_classifier_args(parser):
                              help="Maximum sequence length to process (for unsupervised rec)")
     data_group.add_argument('--lazy', action='store_true',
                              help='whether to lazy evaluate the data set')
-    data_group.set_defaults(split='1.', data='data/binary_sst/train.csv')
-    data_group.set_defaults(valid='data/binary_sst/val.csv', test='data/binary_sst/test.csv')
+    data_group.set_defaults(split='1.', data=['data/binary_sst/train.csv'])
+    data_group.set_defaults(valid=['data/binary_sst/val.csv'], test=['data/binary_sst/test.csv'])
     data_group.set_defaults(shuffle=True)
     group = parser.add_argument_group('finetune_classifier', 'arguments used for finetune script')
     group.add_argument('--use-logreg', action='store_true',

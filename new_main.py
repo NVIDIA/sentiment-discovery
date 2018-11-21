@@ -159,7 +159,7 @@ def evaluate(data_source, model, criterion, args):
                 loss.data /= args.world_size
             total_loss += loss.data.float()
             i+=1
-    return total_loss / max_iters
+    return (total_loss / max_iters).item()
 
 def train(epoch, model, optim, train_data, LR, LR_Warmer, criterion, args, total_iters=0, skipped_iters=0, elapsed_time=False):
     # Turn on training mode which enables dropout.
@@ -198,9 +198,11 @@ def train(epoch, model, optim, train_data, LR, LR_Warmer, criterion, args, total
         else:
             loss.backward()
 
+        print('debug')
+
         if distributed:
             torch.distributed.all_reduce(loss.data)
-            loss.data /= args.world_size
+            loss.data = loss.data/args.world_size
             model.allreduce_params()
 
         # clipping gradients helps prevent the exploding gradient problem in RNNs / LSTMs.
@@ -231,7 +233,7 @@ def train(epoch, model, optim, train_data, LR, LR_Warmer, criterion, args, total
                 skipped_iters += 1
 
         if ((i+1) % args.log_interval == 0):
-            cur_loss = total_loss[0] / args.log_interval
+            cur_loss = total_loss.item() / args.log_interval
             cur_time = time.time()
             elapsed = cur_time - start_time
             total_elapsed = cur_time - t0 + elapsed_time
@@ -284,14 +286,30 @@ def main():
     torch.backends.cudnn.enabled = False
     args.cuda = torch.cuda.is_available()
 
+    print(args.world_size)
+    if args.multinode_init:
+        args.rank = int(os.getenv('RANK', 0))
+        args.world_size = int(os.getenv("WORLD_SIZE", 1))
+
     # initialize distributed process group and set device
     if args.rank > 0:
         torch.cuda.set_device(args.rank % torch.cuda.device_count())
 
+    print(args.rank, args.world_size)
+
     if args.world_size > 1:
-        distributed_init_file = os.path.splitext(args.save)[0]+'.distributed.dpt'
+        init_method='tcp://'
+        if not args.multinode_init:
+            init_method+='localhost:6000'
+        else:
+            master_ip = os.getenv('MASTER_ADDR', 'localhost')
+            master_port = os.getenv('MASTER_PORT', '6666')
+            init_method+=master_ip+':'+master_port
         torch.distributed.init_process_group(backend=args.distributed_backend, world_size=args.world_size,
-                                             init_method='tcp://localhost:6000', rank=args.rank)
+                                             rank=args.rank, init_method=init_method)
+    print('group initialized')
+    sys.stdout.flush()
+    sys.stderr.flush()
     # Set the random seed manually for reproducibility.
     if args.seed is not None and args.seed > 0:
         random.seed(args.seed)
@@ -346,26 +364,26 @@ def main():
                 best_val_loss = val_loss
             if args.world_size == 1 or torch.distributed.get_rank() == 0:
                 os.remove(args.save+'.train_lock')
-            if args.world_size > 1:
-                torch.distributed.barrier()
+#            if args.world_size > 1:
+#                torch.distributed.barrier()
             torch.cuda.synchronize()
 
     except KeyboardInterrupt:
         print('-' * 89)
         print('Exiting from training early')
 
-    while os.path.exists(args.save+'.train_lock'):
-        time.sleep(1)
+    #while os.path.exists(args.save+'.train_lock'):
+    #    time.sleep(1)
 
     # Load the best saved model.
-    if os.path.exists(args.save):
-    #    with open(args.save, 'rb') as f:
-        model.load_state_dict(torch.load(args.save, 'cpu'))
+    #if os.path.exists(args.save):
+    ##    with open(args.save, 'rb') as f:
+    #    model.load_state_dict(torch.load(args.save, 'cpu'))
 
-    if not args.no_weight_norm and args.rank <= 0:
-        remove_weight_norm(rnn_model)
-        with open(args.save, 'wb') as f:
-            torch.save(model.state_dict(), f)
+    #if not args.no_weight_norm and args.rank <= 0:
+    #    remove_weight_norm(rnn_model)
+    #    with open(args.save, 'wb') as f:
+    #        torch.save(model.state_dict(), f)
 
     if test_data is not None:
         # Run on test data.

@@ -140,7 +140,7 @@ class SentimentClassifier(nn.Module):
         else:
             # NOTE: Dropout is for Classifier. Add separate RNN dropout or via params, if needed.
             self.encoder = RNNFeaturizer(model_type, ntoken, ninp, nhid, nlayers, dropout=0.0, all_layers=all_layers,
-                                         concat_pools=concat_pools, get_lm_out=get_lm_out)
+                                         concat_pools=concat_pools, get_lm_out=get_lm_out, hidden_warmup=args.num_hidden_warmup > 0)
             out_size = self.encoder.output_size
         self.encoder_dim = out_size
 

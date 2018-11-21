@@ -14,11 +14,11 @@ LOGDIR = os.path.join(LOGDIR, savepath)
 if not os.path.exists(LOGDIR):
     os.makedirs(LOGDIR)
 
-if '--world_size' in argslist:
-    world_size = int(argslist[argslist.index('--world_size')+1])
+if '--world-size' in argslist:
+    world_size = int(argslist[argslist.index('--world-size')+1])
 else:
     world_size = torch.cuda.device_count()
-    argslist.append('--world_size')
+    argslist.append('--world-size')
     argslist.append(str(world_size))
 
 for i in range(world_size):

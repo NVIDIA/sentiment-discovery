@@ -32,7 +32,9 @@ def get_dataset(path, **kwargs):
 def make_dataset(path, seq_length, text_key, label_key, lazy=False, process_fn=process_str, split=[1.],
                 delim=',', loose=False, binarize_sent=False, drop_unlabeled=False, tokenizer=None,
                 tokenizer_type='CharacterLevelTokenizer', tokenizer_model_path=None, vocab_size=None,
-                model_type='bpe', pad_token=0, character_converage=1.0, **kwargs):
+                model_type='bpe', pad_token=0, character_converage=1.0, non_binary_cols=None, **kwargs):
+    if non_binary_cols is not None:
+        label_key = non_binary_cols
     def get_dataset_from_path(path_):
         if lazy:
             if not exists_lazy(path_, data_type='data'):

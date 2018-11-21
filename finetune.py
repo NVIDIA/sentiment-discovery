@@ -28,9 +28,7 @@ from tqdm import tqdm
 from model import DistributedDataParallel as DDP
 from configure_data import configure_data
 from learning_rates import AnnealingLR, SlantedTriangularLR, ConstantLR
-from arguments import add_general_args, add_transformer_args, add_classifier_model_args, add_finetune_classifier_args, add_recurrent_args
-#from transfer import score_and_predict, get_top_k_neuron_weights, plot_logits, plot_logit_and_save
-#from transfer import plot_weight_contribs_and_save, normalize
+from arguments import add_general_args, add_classifier_model_args, add_finetune_classifier_args
 from train_utils import update_info_dict, get_metric
 from analysis import _binary_threshold, _neutral_threshold_two_output
 
@@ -39,12 +37,9 @@ def get_data_and_args():
     parser = add_general_args(parser)
     parser = add_model_args(parser)
     parser = add_classifier_model_args(parser)
-    data_config, data_parser, finetune_classifier_parser, parser  = add_finetune_classifier_args(parser)
-    
-    # parser.set_defaults(shuffle=True)
+    data_config, data_parser, finetune_classifier_parser, parser = add_finetune_classifier_args(parser)
 
     args = parser.parse_args(unparsed_args)
-    args.__dict__.update(general_args.__dict__)
     args.cuda = torch.cuda.is_available()
 
     if args.seed is not -1:
@@ -135,25 +130,20 @@ def get_supervised_batch(batch, use_cuda, model, ids=False, args=None, save_outp
     Process batch and return tuple of (text, text label, text length) long tensors.
     Text is returned in column format with (time, batch) dimensions.
     '''
-    (text, timesteps), labels = batch
+    text = batch['text'][0]
+    timesteps = batch['length']
+    labels = batch['label']
     text = Variable(text).long()
-    if ids:
-        timesteps = Variable(torch.argmax(text.eq(1), dim=1) + 1).long()
-    if isinstance(labels, list):
-        labels = labels[0]
-        # Repeat labels if multihead per class
-        labels = [l.repeat(heads_per_class,1) for l in labels]
-        if save_outputs:
-            pass
-        labels = torch.cat(labels, 0).view(model.out_dim, -1).t()
-        labels = Variable(labels).view(-1, labels.shape[1]).float()
-    elif args.use_softmax:
+    timesteps = Variable(timesteps).long()
+    labels = Variable(labels)
+    if args.use_softmax:
         labels = Variable(labels).view(-1).long()
-    else:
-        # Repeat labels if multihead per class
-        labels = labels.repeat(heads_per_class,1).t()
+    elif heads_per_class > 1:
+        labels = labels.view(labels.size(0), -1, 1)
+        labels = labels.expand(-1,-1,heads_per_class)
         labels = Variable(labels).view(-1, heads_per_class).float()
-    labels = labels[:text.size(0)]
+    else:
+        labels = labels.float()
     if use_cuda:
         text, timesteps, labels = text.cuda(), timesteps.cuda(), labels.cuda()
     return text.t(), labels, timesteps-1
@@ -174,8 +164,6 @@ def transform(model, text_batch, labels_batch, length_batch, args, LR=None):
         # doing true finetuning
         class_out, lm_or_encoder_out = get_outs()
     else:
-        # if args.use_logreg:
-        #     assert not args.non_binary_cols and not args.aux_lm_loss
         with torch.no_grad():
             class_out, lm_or_encoder_out = get_outs()
 
@@ -306,13 +294,6 @@ def train_logreg(args, trX, trY, vaX=None, vaY=None, teX=None, teY=None, penalty
         eval_score = get_metric(info_dicts)
 
     scores.append(eval_score * 100)
-    test_preds_path = args.save_test_preds
-    args.save_test_preds = args.save_test_preds[:-4]+'.val.txt'
-    tqdm.write(args.save_test_preds)
-    write_results(val_preds, val_labels, args.save_test_preds)
-    args.save_test_preds = test_preds_path
-    tqdm.write(args.save_test_preds)
-    write_results(preds, eval_labels, args.save_test_preds)
     return model, scores, c, nnotzero
 
 def finetune(model, text, args, val_data=None, LR=None, reg_loss=None, tqdm_desc='nvidia', save_outputs=False,
@@ -364,7 +345,7 @@ def finetune(model, text, args, val_data=None, LR=None, reg_loss=None, tqdm_desc
     total_multihead_variance_loss = 0
     class_accuracies = torch.zeros(model.out_dim).cuda()
     if model.out_dim/heads_per_class > 1 and not args.use_softmax:
-        keys = list(json.loads(open(args.non_binary_cols).readline()).keys())
+        keys = args.non_binary_cols
     elif args.use_softmax:
         keys = [str(m) for m in range(model.out_dim)]
     else:
@@ -397,22 +378,16 @@ def finetune(model, text, args, val_data=None, LR=None, reg_loss=None, tqdm_desc
 
         # Compute LM loss, no matter what
         lm_labels = text_batch[1:]
-        lm_losses = 0.5 * aux_loss_fn(lm_out[:-1].view(-1, lm_out.size(2)).contiguous().float(),
+        lm_losses = aux_loss_fn(lm_out[:-1].view(-1, lm_out.size(2)).contiguous().float(),
                                   lm_labels.contiguous().view(-1))
 
-        pad_idx = 1 if args.ids else 0
-        max_len = max(torch.argmax(lm_labels.eq(pad_idx), dim=0))
-        pad_mask = lm_labels.contiguous().view(-1).eq(pad_idx) # where there are pads
-        multiplier_mask = lm_labels[:max_len].contiguous().view(-1).eq(pad_idx)
-        try:
-            missing = float(multiplier_mask.size(0)) / (multiplier_mask.size(0) - torch.sum(multiplier_mask).item())
-        except ZeroDivisionError:
-            missing = 1
+        pad_mask = (torch.arange(text_batch.size(0)).unsqueeze(1).cuda() > length_batch).float()
+        portion_unpadded = padding_mask.sum() / padding_mask.size(0)
+        lm_loss = portion_unpadded * torch.mean(lm_losses * (padding_mask.view(-1).float()))
 
-        lm_loss = missing * torch.mean(lm_losses * (1 - pad_mask.float()))
         # Scale LM loss -- since it's so big
         if args.aux_lm_loss_weight > 0.:
-            lm_loss *= args.aux_lm_loss_weight
+            lm_loss = lm_loss * args.aux_lm_loss_weight
 
         # Do we use the LM loss
         if args.aux_lm_loss and args.aux_lm_loss_weight > 0.:
@@ -643,20 +618,14 @@ def main():
             if args.use_softmax:
                 vaT = []
             save_outputs = False
-            # report_metrics = ['jacc', 'acc','mcc', 'f1', 'var'] if args.all_metrics else [args.metric]
             report_metrics = ['jacc', 'acc','mcc', 'f1', 'recall', 'precision', 'var'] if args.all_metrics else [args.metric]
             print_str = ""
-            if not (os.path.exists(os.path.join(save_root, 'trXt.npy')) and args.use_cached):
-                trXt, trY, trC, _ = finetune(model, train_data, args, val_data=val_data, LR=LR, reg_loss=reg_loss, tqdm_desc='train', heads_per_class=args.heads_per_class, last_thresholds=vaT)
-                data_str_base = "Train Loss: {:4.2f} Train {:5s} (All): {:5.2f}, Train Class {:5s}: {}"
-                for idx, m in enumerate(report_metrics):
-                    data_str = data_str_base.format(trXt, m, trY[idx] * 100, m, trC[idx])
-                    print_str += data_str + " " * max(0, 110 - len(data_str)) + "\n"
-                # np.save(os.path.join(save_root, 'trXt'), trXt)
-           # np.save(os.path.join(save_root, 'trY'), trY)
-            else:
-                trXt = np.load(os.path.join(save_root, 'trXt.npy'))
-                trY = np.load(os.path.join(save_root, 'trY.npy'))
+            trXt, trY, trC, _ = finetune(model, train_data, args, val_data=val_data, LR=LR, reg_loss=reg_loss, tqdm_desc='train', heads_per_class=args.heads_per_class, last_thresholds=vaT)
+            data_str_base = "Train Loss: {:4.2f} Train {:5s} (All): {:5.2f}, Train Class {:5s}: {}"
+            for idx, m in enumerate(report_metrics):
+                data_str = data_str_base.format(trXt, m, trY[idx] * 100, m, trC[idx])
+                print_str += data_str + " " * max(0, 110 - len(data_str)) + "\n"
+
             vaXt, vaY = None, None
             if val_data is not None:
                 if not (os.path.exists(os.path.join(save_root, 'vaXt.npy')) and args.use_cached):
@@ -664,7 +633,6 @@ def main():
                     # Take command line, for metric for which to measure best performance against.
                     # NOTE: F1, MCC, Jaccard are good measures. Accuracy is not -- since so skewed.
                     selection_metric = ['jacc', 'acc','mcc', 'f1', 'recall', 'precision', 'var'].index(args.threshold_metric)
-                    # selection_metric = ['jacc', 'acc','mcc', 'f1'].index(args.threshold_metric)
                     avg_Y = vaY[selection_metric]
                     tqdm.write('avg_metric '+str(avg_Y))
                     if avg_Y > best_vaY:
@@ -680,123 +648,116 @@ def main():
                     vaY = np.load(os.path.join(save_root, 'vaY.npy'))
             teXt, teY = None, None
             if test_data is not None:
-                if not (os.path.exists(os.path.join(save_root, 'teXt.npy')) and args.use_cached):
-                    # Hardcode -- enable to always save outputs [regardless of metrics]
-                    # save_outputs = True
-                    if save_outputs:
-                        tqdm.write('saving outputs')
-                        try:
-                            with torch.no_grad():
-                                if args.automatic_thresholding or args.report_no_thresholding:
-                                    auto_thresholds = None
-                                    dual_thresholds = None
-                                    # NOTE -- we manually threshold to F1 [not necessarily good]
-                                    if not args.report_no_thresholding:
-                                        V_pred, V_label, V_std = generate_outputs(model, val_data, args)
-                                        if args.dual_threshold:
-                                            # get dual threshold (do not call auto thresholds)
-                                            # TODO: Handle multiple heads per class
-                                            _, dual_thresholds = _neutral_threshold_two_output(V_pred.cpu().numpy(), V_label.cpu().numpy())
-                                        else:
-                                            # Use args.threshold_metric to choose which category to threshold on. F1 and Jaccard are good options
-                                            # NOTE: For multiple heads per class, can threshold each head (default) or single threshold. Little difference once model converges.
-                                            _, auto_thresholds, _, _ = _binary_threshold(V_pred.view(-1, model.out_dim).contiguous(), V_label.view(-1, model.out_dim).contiguous(),
-                                                args.threshold_metric, args.micro, global_tweaks=args.global_tweaks, heads_per_class=args.heads_per_class, class_single_threshold=args.class_single_threshold)
-                                    T_pred, T_label, T_std = generate_outputs(model, test_data, args, auto_thresholds)
-                                    if not args.use_softmax and model.out_dim / args.heads_per_class > 1:
-                                        keys = list(json.loads(open(args.non_binary_cols).readline()).keys())
-                                        if args.dual_threshold:
-                                            if len(keys) == len(dual_thresholds):
-                                                print('Dual thresholds: %s' % str(list(zip(keys, dual_thresholds))))
-                                        else:
-                                            print('Class thresholds: %s' % str(list(zip(keys, auto_thresholds))))
-                                        #add neutral key to list of keys
-                                        if args.dual_threshold:
-                                            keys += ['neutral']
-                                    elif args.use_softmax:
-                                        keys = [str(m) for m in range(model.out_dim)]
+                # Hardcode -- enable to always save outputs [regardless of metrics]
+                # save_outputs = True
+                if save_outputs:
+                    tqdm.write('saving outputs')
+                    try:
+                        with torch.no_grad():
+                            if args.automatic_thresholding or args.report_no_thresholding:
+                                auto_thresholds = None
+                                dual_thresholds = None
+                                # NOTE -- we manually threshold to F1 [not necessarily good]
+                                if not args.report_no_thresholding:
+                                    V_pred, V_label, V_std = generate_outputs(model, val_data, args)
+                                    if args.dual_threshold:
+                                        # get dual threshold (do not call auto thresholds)
+                                        # TODO: Handle multiple heads per class
+                                        _, dual_thresholds = _neutral_threshold_two_output(V_pred.cpu().numpy(), V_label.cpu().numpy())
                                     else:
-                                        print('Class threshold: %s' % str([args.label_key, auto_thresholds[0]]))
-                                        keys = ['']
+                                        # Use args.threshold_metric to choose which category to threshold on. F1 and Jaccard are good options
+                                        # NOTE: For multiple heads per class, can threshold each head (default) or single threshold. Little difference once model converges.
+                                        _, auto_thresholds, _, _ = _binary_threshold(V_pred.view(-1, model.out_dim).contiguous(), V_label.view(-1, model.out_dim).contiguous(),
+                                            args.threshold_metric, args.micro, global_tweaks=args.global_tweaks, heads_per_class=args.heads_per_class, class_single_threshold=args.class_single_threshold)
+                                T_pred, T_label, T_std = generate_outputs(model, test_data, args, auto_thresholds)
+                                if not args.use_softmax and model.out_dim / args.heads_per_class > 1:
+                                    keys = args.non_binary_cols
+                                    if args.dual_threshold:
+                                        if len(keys) == len(dual_thresholds):
+                                            print('Dual thresholds: %s' % str(list(zip(keys, dual_thresholds))))
+                                    else:
+                                        print('Class thresholds: %s' % str(list(zip(keys, auto_thresholds))))
+                                    #add neutral key to list of keys
+                                    if args.dual_threshold:
+                                        keys += ['neutral']
+                                elif args.use_softmax:
+                                    keys = [str(m) for m in range(model.out_dim)]
+                                else:
+                                    print('Class threshold: %s' % str([args.label_key, auto_thresholds[0]]))
+                                    keys = ['']
+                                info_dicts = [{'fp' : 0, 'tp' : 0, 'fn' : 0, 'tn' : 0, 'std' : 0.,
+                                               'metric' : args.metric, 'micro' : True} for k in keys]
+                                #perform dual threshold here, adding the neutral labels to T_label, thresholding existing predictions and adding neutral preds to T_Pred
+                                if args.dual_threshold:
+                                    if dual_thresholds is None:
+                                        dual_thresholds = [.5, .5]
+                                    def make_onehot_w_neutral(label):
+                                        rtn = [0]*3
+                                        rtn[label] = 1
+                                        return rtn
+                                    def get_label(pos_neg):
+                                        thresholded = [pos_neg[0]>=dual_thresholds[0], pos_neg[1]>=dual_thresholds[1]]
+                                        if thresholded[0] == thresholded[1]:
+                                            return 2
+                                        return thresholded.index(1)
+                                    new_labels = []
+                                    new_preds = []
+                                    for j, lab in  enumerate(T_label):
+                                        pred = T_pred[j]
+                                        new_preds.append(make_onehot_w_neutral(get_label(pred)))
+                                        new_labels.append(make_onehot_w_neutral(get_label(lab)))
+                                    T_pred = np.array(new_preds)
+                                    T_label = np.array(new_labels)
+
+                                # HACK: If dual threshold, hardcoded -- assume positive, negative and neutral -- in that order
+                                # It's ok to train with other categories (after positive, neutral) as auxilary loss -- but won't calculate in test
+                                if args.dual_threshold:
+                                    print(keys)
+                                    keys = ['positive', 'negative', 'neutral']
                                     info_dicts = [{'fp' : 0, 'tp' : 0, 'fn' : 0, 'tn' : 0, 'std' : 0.,
                                                    'metric' : args.metric, 'micro' : True} for k in keys]
-                                    #perform dual threshold here, adding the neutral labels to T_label, thresholding existing predictions and adding neutral preds to T_Pred
-                                    if args.dual_threshold:
-                                        if dual_thresholds is None:
-                                            dual_thresholds = [.5, .5]
-                                        def make_onehot_w_neutral(label):
-                                            rtn = [0]*3
-                                            rtn[label] = 1
-                                            return rtn
-                                        def get_label(pos_neg):
-                                            thresholded = [pos_neg[0]>=dual_thresholds[0], pos_neg[1]>=dual_thresholds[1]]
-                                            if thresholded[0] == thresholded[1]:
-                                                return 2
-                                            return thresholded.index(1)
-                                        new_labels = []
-                                        new_preds = []
-                                        for j, lab in  enumerate(T_label):
-                                            pred = T_pred[j]
-                                            new_preds.append(make_onehot_w_neutral(get_label(pred)))
-                                            new_labels.append(make_onehot_w_neutral(get_label(lab)))
-                                        T_pred = np.array(new_preds)
-                                        T_label = np.array(new_labels)
-
-                                    # HACK: If dual threshold, hardcoded -- assume positive, negative and neutral -- in that order
-                                    # It's ok to train with other categories (after positive, neutral) as auxilary loss -- but won't calculate in test
-                                    if args.dual_threshold:
-                                        print(keys)
-                                        keys = ['positive', 'negative', 'neutral']
-                                        info_dicts = [{'fp' : 0, 'tp' : 0, 'fn' : 0, 'tn' : 0, 'std' : 0.,
-                                                       'metric' : args.metric, 'micro' : True} for k in keys]
-                                        print(keys)
-                                    # In the case of multiple heads per class, group here -- as we iterate over keys
-                                    for j, k in enumerate(keys):
-                                        # Unless we already grouped average predictions.
-                                        heads = 1 if args.use_class_multihead_average else args.heads_per_class
-                                        for offset in range(heads):
-                                            j_off = j * heads + offset
-                                            # Debug, remove
-                                            #print('%d/%d -- %s' % (j_off, len(keys) * args.heads_per_class, k))
-                                            # If neutrals, derive neutral "STD" from neg, pos average
-                                            if args.dual_threshold:
-                                                neutral_std = torch.cat((T_std[:,0].unsqueeze(1), T_std[:,1].unsqueeze(1)), 1)
-                                                neutral_std = neutral_std.mean(1)
-                                                T_std = torch.cat((T_std, neutral_std.unsqueeze(1)), 1)
-                                                # HACK: For dual threshold, mismatch, get tensor on CPU
-                                                T_std = T_std.cpu()
-                                            p, l, v = T_pred[:,j_off], T_label[:,j_off], T_std[:,j_off]
-                                            update_info_dict(info_dicts[j], p, l, std=v)
-                                    tqdm.write(str(info_dicts))
-                                    total_metrics, metric_strings = get_metric_report(info_dicts, args, keys)
-                                    tqdm.write(str(total_metrics))
-                                    tqdm.write('; '.join(metric_strings))
-                                    # TODO: Write (per item) standard deviations, along with results!
-                                    print('Saving prediction results %s to %s' % (str(T_pred.shape), args.save_test_preds))
-                                    write_results(T_pred, T_label, args.save_test_preds)
-                                else:
-                                    test_preds_path = args.save_test_preds
-                                    args.save_test_preds = args.save_test_preds[:-4]+'.val.txt'
-                                    tqdm.write(args.save_test_preds)
-                                    generate_outputs(model, val_data, args)
-                                    args.save_test_preds = test_preds_path
-                                    generate_outputs(model, test_data, args)
-                        except KeyboardInterrupt:
-                            pass
-                    else:
+                                    print(keys)
+                                # In the case of multiple heads per class, group here -- as we iterate over keys
+                                for j, k in enumerate(keys):
+                                    # Unless we already grouped average predictions.
+                                    heads = 1 if args.use_class_multihead_average else args.heads_per_class
+                                    for offset in range(heads):
+                                        j_off = j * heads + offset
+                                        # Debug, remove
+                                        #print('%d/%d -- %s' % (j_off, len(keys) * args.heads_per_class, k))
+                                        # If neutrals, derive neutral "STD" from neg, pos average
+                                        if args.dual_threshold:
+                                            neutral_std = torch.cat((T_std[:,0].unsqueeze(1), T_std[:,1].unsqueeze(1)), 1)
+                                            neutral_std = neutral_std.mean(1)
+                                            T_std = torch.cat((T_std, neutral_std.unsqueeze(1)), 1)
+                                            # HACK: For dual threshold, mismatch, get tensor on CPU
+                                            T_std = T_std.cpu()
+                                        p, l, v = T_pred[:,j_off], T_label[:,j_off], T_std[:,j_off]
+                                        update_info_dict(info_dicts[j], p, l, std=v)
+                                tqdm.write(str(info_dicts))
+                                total_metrics, metric_strings = get_metric_report(info_dicts, args, keys)
+                                tqdm.write(str(total_metrics))
+                                tqdm.write('; '.join(metric_strings))
+                                # TODO: Write (per item) standard deviations, along with results!
+                                print('Saving prediction results %s to %s' % (str(T_pred.shape), args.save_test_preds))
+                                write_results(T_pred, T_label, args.save_test_preds)
+                            else:
+                                test_preds_path = args.save_test_preds
+                                args.save_test_preds = args.save_test_preds[:-4]+'.val.txt'
+                                tqdm.write(args.save_test_preds)
+                                generate_outputs(model, val_data, args)
+                                args.save_test_preds = test_preds_path
+                                generate_outputs(model, test_data, args)
+                    except KeyboardInterrupt:
                         pass
-            #        np.save(os.path.join(save_root, 'teXt'), teXt)
-            #        np.save(os.path.join(save_root, 'teY'), teY)
-                    #tqdm.write(teXt, teY)
                 else:
-                    teXt = np.load(os.path.join(save_root, 'teXt.npy'))
-                    teY = np.load(os.path.join(save_root, 'teY.npy'))
+                    pass
             # Save the model, upon request
             if args.save_finetune and save_outputs:
                 # Save model if best so far. Note epoch number, and also keys [what is it predicting], as well as optional version number
                 # TODO: Add key string to handle multiple runs?
                 if args.non_binary_cols:
-                    keys = list(json.loads(open(args.non_binary_cols).readline()).keys())
+                    keys = args.non_binary_cols
                 else:
                     keys = [args.label_key]
                 model_save_path = os.path.splitext(args.save_test_preds)[0]+'_model_'+args.model_version_name+'_'+'_'.join(keys)+'_ep'+str(e)+'.pt'
@@ -810,7 +771,7 @@ def main():
                 # Also save thresholds
                 thresh_save_path = os.path.splitext(args.save_test_preds)[0]+'_thresholds_'+args.model_version_name+'_'+'_'.join(keys)+'_ep'+str(e)+'.npy'
                 print('Thresh to %s' % thresh_save_path)
-                # keys, auto_threshold
+                # add thresholds to arguments for easy reloading of model config
                 if not args.report_no_thresholding:
                     if args.dual_threshold:
                         np.save(thresh_save_path, list(zip(keys, dual_thresholds)))
