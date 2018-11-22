@@ -41,6 +41,7 @@ def setup_model_and_optim(args, train_data, tokenizer):
     if args.cuda:
         model.cuda()
 
+
     optim = None
     if args.load != '':
         sd = torch.load(args.load, map_location='cpu')
@@ -198,8 +199,6 @@ def train(epoch, model, optim, train_data, LR, LR_Warmer, criterion, args, total
         else:
             loss.backward()
 
-        print('debug')
-
         if distributed:
             torch.distributed.all_reduce(loss.data)
             loss.data = loss.data/args.world_size
@@ -216,6 +215,7 @@ def train(epoch, model, optim, train_data, LR, LR_Warmer, criterion, args, total
             optim.update_master_grads()
 
         optim.step()
+
 
         # step learning rate and log training progress
         lr = optim.param_groups[0]['lr']
@@ -286,7 +286,6 @@ def main():
     torch.backends.cudnn.enabled = False
     args.cuda = torch.cuda.is_available()
 
-    print(args.world_size)
     if args.multinode_init:
         args.rank = int(os.getenv('RANK', 0))
         args.world_size = int(os.getenv("WORLD_SIZE", 1))
@@ -294,8 +293,6 @@ def main():
     # initialize distributed process group and set device
     if args.rank > 0:
         torch.cuda.set_device(args.rank % torch.cuda.device_count())
-
-    print(args.rank, args.world_size)
 
     if args.world_size > 1:
         init_method='tcp://'
@@ -307,9 +304,6 @@ def main():
             init_method+=master_ip+':'+master_port
         torch.distributed.init_process_group(backend=args.distributed_backend, world_size=args.world_size,
                                              rank=args.rank, init_method=init_method)
-    print('group initialized')
-    sys.stdout.flush()
-    sys.stderr.flush()
     # Set the random seed manually for reproducibility.
     if args.seed is not None and args.seed > 0:
         random.seed(args.seed)
