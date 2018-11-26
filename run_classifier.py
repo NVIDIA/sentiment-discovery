@@ -107,15 +107,15 @@ def classify(model, text, args):
         return text.t(), labels, timesteps-1
 
     def get_outs(text_batch, length_batch):
-        if args.model == 'transformer':
-            class_out, lm_or_encoder_out = model(text_batch, seq_len=length_batch, prev_output_tokens=text_batch)
+        if args.model.lower() == 'transformer' or args.model.lower() == 'bert':
+            class_out, (lm_or_encoder_out, state) = model(text_batch, length_batch, args.get_hidden)
         else:
             model.encoder.rnn.reset_hidden(args.batch_size)
             for _ in range(1 + args.num_hidden_warmup):
-                class_out, lm_or_encoder_out = model(text_batch, seq_len=length_batch, get_hidden=args.get_hidden)
+                class_out, (lm_or_encoder_out, state) = model(text_batch, length_batch, args.get_hidden)
         if args.use_softmax:
             class_out = torch.max(class_out,-1)[1].view(-1,1)
-        return class_out, lm_or_encoder_out
+        return class_out, (lm_or_encoder_out, state)
 
 
     tstart = start = time.time()

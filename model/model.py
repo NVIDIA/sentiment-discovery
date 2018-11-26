@@ -3,6 +3,7 @@ import math
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
+import torch.nn.functional as F
 
 from apex import RNN
 from .transformer_utils import Embedding
@@ -283,10 +284,12 @@ class TransformerFeaturizer(nn.Module):
         if get_hidden:
             encoder_out = encoder_out[0]
         feats = encoder_out[seq_len.squeeze(), torch.arange(seq_len.size(0))]
+        if get_hidden:
+            feats = [feats, None]
         lm_out = None
         if self.aux_lm_loss:
             lm_out = F.linear(encoder_out, self.encoder.encoder.embed_out)
-        return out, lm_out
+        return feats, lm_out
 
 class BERTModel(nn.Module):
     def __init__(self, args):

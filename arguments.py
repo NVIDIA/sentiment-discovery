@@ -21,7 +21,7 @@ def add_general_args(parser):
                         help='report interval')
     group.add_argument('--save', type=str,  default='lang_model.pt',
                         help='path to save the final model')
-    group.add_argument('--load', type=str, default='',
+    group.add_argument('--load', type=str, default=None,
                         help='path to a previously saved model checkpoint')
     group.add_argument('--load-optim', action='store_true',
                         help='load most recent optimizer to resume training')
@@ -150,8 +150,6 @@ def add_transformer_args(parser):
                              ' (requires shared dictionary and embed dim)')
     group.add_argument('--use-final-embed', action='store_true',
                         help='whether to use the final timestep embeddings as output of transformer (in classification)')
-    parser.add_argument('--get-hidden', action='store_true',
-                    help='whether to use the hidden state (as opposed to cell state) as features for recurrent classifier')
     return parser
 
 def add_classifier_model_args(parser):
@@ -224,6 +222,7 @@ def add_finetune_classifier_args(parser):
     data_group.set_defaults(split='1.', data=['data/binary_sst/train.csv'])
     data_group.set_defaults(valid=['data/binary_sst/val.csv'], test=['data/binary_sst/test.csv'])
     data_group.set_defaults(shuffle=True)
+    parser.set_defaults(get_hidden=True)
     group = parser.add_argument_group('finetune_classifier', 'arguments used for finetune script')
     group.add_argument('--use-logreg', action='store_true',
                         help='use scikitlearn logistic regression instead of finetuning whole classifier')

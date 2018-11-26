@@ -28,8 +28,8 @@ from tqdm import tqdm
 from model import DistributedDataParallel as DDP
 from configure_data import configure_data
 from learning_rates import AnnealingLR, SlantedTriangularLR, ConstantLR
-from arguments import add_general_args, add_classifier_model_args, add_finetune_classifier_args
-from train_utils import update_info_dict, get_metric
+from arguments import add_general_args, add_model_args, add_classifier_model_args, add_finetune_classifier_args
+from metric_utils import update_info_dict, get_metric
 from analysis import _binary_threshold, _neutral_threshold_two_output
 
 def get_data_and_args():
@@ -39,7 +39,7 @@ def get_data_and_args():
     parser = add_classifier_model_args(parser)
     data_config, data_parser, finetune_classifier_parser, parser = add_finetune_classifier_args(parser)
 
-    args = parser.parse_args(unparsed_args)
+    args = parser.parse_args()
     args.cuda = torch.cuda.is_available()
 
     if args.seed is not -1:
@@ -69,24 +69,27 @@ def get_model_and_optim(args, train_data):
     if args.fp16:
         model.half()
     # load char embedding and recurrent encoder for featurization
-    with open(args.load, 'rb') as f:
-        sd = x = torch.load(f)
-        if not args.load_finetuned and 'encoder' in sd:
-            sd = sd['encoder']
+    if args.load is not None and args.load != '':
+        with open(args.load, 'rb') as f:
+            sd = x = torch.load(f)
+            if 'sd' in sd:
+                sd = sd['sd']
+            if not args.load_finetuned and 'encoder' in sd:
+                sd = sd['encoder']
 
-    if not args.load_finetuned:
-        try:
-            model.encoder.load_state_dict(sd)
-        except:
-            # if state dict has weight normalized parameters apply and remove weight norm to model while loading sd
-            if hasattr(model.encoder, 'rnn'):
-                apply_weight_norm(model.encoder.rnn)
-            else:
-                apply_weight_norm(model.encoder)
-            model.encoder.load_state_dict(sd)
-            remove_weight_norm(model)
-    else:
-        model.load_state_dict(sd)
+        if not args.load_finetuned:
+            try:
+                model.encoder.load_state_dict(sd)
+            except:
+                # if state dict has weight normalized parameters apply and remove weight norm to model while loading sd
+                if hasattr(model.encoder, 'rnn'):
+                    apply_weight_norm(model.encoder.rnn)
+                else:
+                    apply_weight_norm(model.encoder)
+                model.encoder.load_state_dict(sd)
+                remove_weight_norm(model)
+        else:
+            model.load_state_dict(sd)
 
     optims = {
         'adam' : 'Adam',
@@ -143,7 +146,7 @@ def get_supervised_batch(batch, use_cuda, model, ids=False, args=None, save_outp
         labels = labels.expand(-1,-1,heads_per_class)
         labels = Variable(labels).view(-1, heads_per_class).float()
     else:
-        labels = labels.float()
+        labels = labels.view(-1, model.out_dim).float()
     if use_cuda:
         text, timesteps, labels = text.cuda(), timesteps.cuda(), labels.cuda()
     return text.t(), labels, timesteps-1
@@ -152,13 +155,15 @@ def transform(model, text_batch, labels_batch, length_batch, args, LR=None):
     batch_size = text_batch.size(1)
 
     def get_outs():
-        if args.model == 'transformer':
-             class_out, lm_or_encoder_out = model(text_batch, seq_len=length_batch, prev_output_tokens=text_batch)
+        if args.model.lower() == 'transformer' or args.model.lower() == 'bert':
+            class_out, (lm_or_encoder_out, state) = model(text_batch, length_batch, args.get_hidden)
         else:
-            model.encoder.rnn.reset_hidden(batch_size)
+            model.encoder.rnn.reset_hidden(args.batch_size)
             for _ in range(1 + args.num_hidden_warmup):
-                 class_out, lm_or_encoder_out = model(text_batch, seq_len=length_batch, get_hidden=args.get_hidden)
-        return class_out, lm_or_encoder_out
+                class_out, (lm_or_encoder_out, state) = model(text_batch, length_batch, args.get_hidden)
+        if args.use_softmax:
+            class_out = torch.max(class_out,-1)[1].view(-1,1)
+        return class_out, (lm_or_encoder_out, state)
 
     if LR is not None and not args.use_logreg:
         # doing true finetuning
@@ -364,7 +369,7 @@ def finetune(model, text, args, val_data=None, LR=None, reg_loss=None, tqdm_desc
     print('Running %d batches' % len(text))
     for i, data in tqdm(enumerate(text), total=len(text), unit="batch", desc=tqdm_desc, position=1, ncols=100):
         text_batch, labels_batch, length_batch = get_supervised_batch(data, args.cuda, model, args.ids, args, heads_per_class=args.heads_per_class)
-        class_out, lm_out = transform(model, text_batch, labels_batch, length_batch, args, LR)
+        class_out, (lm_out, _) = transform(model, text_batch, labels_batch, length_batch, args, LR)
         classifier_loss = binary_loss_fn(class_out, labels_batch)
         loss = classifier_loss
         classifier_loss = classifier_loss.clone() # save for reporting
@@ -381,7 +386,7 @@ def finetune(model, text, args, val_data=None, LR=None, reg_loss=None, tqdm_desc
         lm_losses = aux_loss_fn(lm_out[:-1].view(-1, lm_out.size(2)).contiguous().float(),
                                   lm_labels.contiguous().view(-1))
 
-        pad_mask = (torch.arange(text_batch.size(0)).unsqueeze(1).cuda() > length_batch).float()
+        padding_mask = (torch.arange(lm_labels.size(0)).unsqueeze(1).cuda() > length_batch).float()
         portion_unpadded = padding_mask.sum() / padding_mask.size(0)
         lm_loss = portion_unpadded * torch.mean(lm_losses * (padding_mask.view(-1).float()))
 
@@ -411,8 +416,8 @@ def finetune(model, text, args, val_data=None, LR=None, reg_loss=None, tqdm_desc
             info_dicts[math.floor(j/heads_per_class)] = update_info_dict(info_dicts[math.floor(j/heads_per_class)], labels_batch[:, j], class_out[:, j], thresholds[j])
         # Save, for overall thresholding (not on training)
         if threshold_validation and LR is None:
-            all_labels.append(labels_batch.detach())
-            all_batches.append(class_out.detach())
+            all_labels.append(labels_batch.detach().cpu().numpy())
+            all_batches.append(class_out.detach().cpu().numpy())
 
     if threshold_validation and LR is None:
         all_batches = np.concatenate(all_batches)
@@ -508,7 +513,7 @@ def generate_outputs(model, text, args, thresholds=None, debug=False):
 
     for i, data in tqdm(enumerate(text), total=len(text), unit='batch', desc='predictions', position=1, ncols=100):
         text_batch, labels_batch, length_batch = get_supervised_batch(data, args.cuda, model, args.ids, args, save_outputs=True, heads_per_class=args.heads_per_class)
-        class_out, lm_out = transform(model, text_batch, labels_batch, length_batch, args)
+        class_out, (lm_out, _) = transform(model, text_batch, labels_batch, length_batch, args)
         # Take the average per-category if requested
         if args.use_class_multihead_average and thresholds is not None:
             class_average = class_out.view(class_out.shape[0],-1,args.heads_per_class).contiguous().mean(2)
@@ -560,21 +565,20 @@ def write_results(preds, labels, save):
         np.savetxt(labels_file, labels.cpu().numpy().astype(int), delimiter=',')
 
 def main():
-    train_data, val_data, test_data, args = get_data_and_args()
+    (train_data, val_data, test_data), tokenizer, args = get_data_and_args()
     # Print args for logging & reproduction. Need to know, including default args
-    print(args)
     if test_data is None:
         test_data = val_data
     model, optim, LR = get_model_and_optim(args, train_data)
 
-    save_root = args.load
-    save_root = save_root.replace('.current', '')
-    save_root = os.path.splitext(save_root)[0]
-    save_root += '_transfer'
-    save_root = os.path.join(save_root, args.save_results)
-    if not os.path.exists(save_root):
-        os.makedirs(save_root)
-    print('writing results to '+save_root)
+    # save_root = '' if args.load is None else args.load
+    # save_root = save_root.replace('.current', '')
+    # save_root = os.path.splitext(save_root)[0]
+    # save_root += '_transfer'
+    # save_root = os.path.join(save_root, args.model_version_name)
+    # if not os.path.exists(save_root):
+    #     os.makedirs(save_root)
+    # print('writing results to '+save_root)
 
     def clf_reg_loss(reg_penalty=.125, order=1):
         loss = 0
@@ -595,7 +599,7 @@ def main():
                 text_batch, labels_batch, length_batch = get_supervised_batch(batch, args.cuda, model, args.ids, args, heads_per_class=args.heads_per_class)
                 # if args.non_binary_cols:
                 #     labels_batch = labels_batch[:,0]-labels_batch[:,1]+1
-                class_out, encoder_out = transform(model, text_batch, labels_batch, length_batch, args)
+                class_out, (encoder_out, _) = transform(model, text_batch, labels_batch, length_batch, args)
                 X_out.append(encoder_out.cpu().numpy())
                 Y_out.append(labels_batch.cpu().numpy())
             X_out = np.concatenate(X_out)
@@ -628,24 +632,20 @@ def main():
 
             vaXt, vaY = None, None
             if val_data is not None:
-                if not (os.path.exists(os.path.join(save_root, 'vaXt.npy')) and args.use_cached):
-                    vaXt, vaY, vaC, vaT = finetune(model, val_data, args, tqdm_desc='val', heads_per_class=args.heads_per_class, last_thresholds=vaT)
-                    # Take command line, for metric for which to measure best performance against.
-                    # NOTE: F1, MCC, Jaccard are good measures. Accuracy is not -- since so skewed.
-                    selection_metric = ['jacc', 'acc','mcc', 'f1', 'recall', 'precision', 'var'].index(args.threshold_metric)
-                    avg_Y = vaY[selection_metric]
-                    tqdm.write('avg_metric '+str(avg_Y))
-                    if avg_Y > best_vaY:
-                        save_outputs = True
-                        best_vaY = avg_Y
-                    data_str_base = "Val   Loss: {:4.2f} Val   {:5s} (All): {:5.2f}, Val   Class {:5s}: {}"
-                    for idx, m in enumerate(report_metrics):
-                        data_str = data_str_base.format(vaXt, m, vaY[idx] * 100, m, vaC[idx])
-                        print_str += data_str + " " * max(0, 110 - len(data_str)) + "\n"
-                    tqdm.write(print_str[:-1])
-                else:
-                    vaXt = np.load(os.path.join(save_root, 'vaXt.npy'))
-                    vaY = np.load(os.path.join(save_root, 'vaY.npy'))
+                vaXt, vaY, vaC, vaT = finetune(model, val_data, args, tqdm_desc='val', heads_per_class=args.heads_per_class, last_thresholds=vaT)
+                # Take command line, for metric for which to measure best performance against.
+                # NOTE: F1, MCC, Jaccard are good measures. Accuracy is not -- since so skewed.
+                selection_metric = ['jacc', 'acc','mcc', 'f1', 'recall', 'precision', 'var'].index(args.threshold_metric)
+                avg_Y = vaY[selection_metric]
+                tqdm.write('avg_metric '+str(avg_Y))
+                if avg_Y > best_vaY:
+                    save_outputs = True
+                    best_vaY = avg_Y
+                data_str_base = "Val   Loss: {:4.2f} Val   {:5s} (All): {:5.2f}, Val   Class {:5s}: {}"
+                for idx, m in enumerate(report_metrics):
+                    data_str = data_str_base.format(vaXt, m, vaY[idx] * 100, m, vaC[idx])
+                    print_str += data_str + " " * max(0, 110 - len(data_str)) + "\n"
+                tqdm.write(print_str[:-1])
             teXt, teY = None, None
             if test_data is not None:
                 # Hardcode -- enable to always save outputs [regardless of metrics]

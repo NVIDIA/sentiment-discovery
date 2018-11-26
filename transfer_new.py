@@ -105,6 +105,17 @@ def transform(model, text, args):
             text, timesteps, labels = text.cuda(), timesteps.cuda(), labels.cuda()
         return text.t(), labels, timesteps-1
 
+    def get_outs(text_batch, length_batch):
+        if args.model.lower() == 'transformer' or args.model.lower() == 'bert':
+            class_out, (lm_or_encoder_out, state) = model(text_batch, length_batch, args.get_hidden)
+        else:
+            model.encoder.rnn.reset_hidden(args.batch_size)
+            for _ in range(1 + args.num_hidden_warmup):
+                class_out, (lm_or_encoder_out, state) = model(text_batch, length_batch, args.get_hidden)
+        if args.use_softmax:
+            class_out = torch.max(class_out,-1)[1].view(-1,1)
+        return class_out, (lm_or_encoder_out, state)
+
     tstart = start = time.time()
     n = 0
     len_ds = len(text)
@@ -117,11 +128,8 @@ def transform(model, text, args):
             n += batch_size
             model.rnn.reset_hidden(batch_size)
             # extract batch of features from text batch
-            for _ in range(1 + args.num_hidden_warmup):
-                cell, _ = model(text_batch, length_batch, args.get_hidden)
-                if args.get_hidden:
-                    cell = cell[0]
-                cell = cell.float()
+            cell, _ = get_outs(text_batch, length_batch)
+            cell = cell.float()
             if first_feature:
                 features = []
                 first_feature = False
@@ -299,7 +307,7 @@ def main():
     (train_data, val_data, test_data), tokenizer, args = get_data_and_args()
     model = get_model(args)
 
-    save_root = args.load
+    save_root = '' if args.load is None else args.load
     save_root = save_root.replace('.current', '')
     save_root = os.path.splitext(save_root)[0]
     save_root += '_transfer'

@@ -280,29 +280,22 @@ class TransformerDecoder(nn.Module):
                 layers = self.layers[start:end]
                 x_ = inputs[0]
                 for layer in layers:
-                    x_, attn = layer(x_, inputs[1], None, None)
+                    x_, attn = layer(x_, None, None, None)
                 return x_
             return custom_forward
 
-        grad_chkpt = True
         if self.training and chkpt_grad:
             l = 0
             num_layers = len(self.layers)
             chunk_length = math.ceil(math.sqrt(num_layers))
             while l < num_layers:
-                x = checkpoint.checkpoint(custom(l, l+chunk_length), x, encoder_out['encoder_out']*1)#torch.autograd.Variable(torch.ones_like(encoder_out['encoder_out'])))
+                x = checkpoint.checkpoint(custom(l, l+chunk_length), x)
                 l += chunk_length
             attn = None
             # decoder layers
         else:
             for layer in self.layers:
-                x, attn = layer(
-                    x,
-                    encoder_out['encoder_out'],
-                    encoder_out['encoder_padding_mask'],
-                    incremental_state,
-                )
-
+                x, attn = layer(x, None, None, None)
 
         # T x B x C -> B x T x C
         #x = x.transpose(0, 1)

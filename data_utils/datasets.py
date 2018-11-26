@@ -213,7 +213,12 @@ class csv_dataset(data.Dataset):
         self.X = []
         self.Y = []
         try:
-            data = pd.read_csv(self.path, sep=self.delim, usecols=[text_key, label_key], encoding='latin-1')
+            cols = [text_key]
+            if isinstance(label_key, list):
+                cols += label_key
+            else:
+                cols += label_key
+            data = pd.read_csv(self.path, sep=self.delim, usecols=cols, encoding='latin-1')
         except:
             data = pd.read_csv(self.path, sep=self.delim, usecols=[text_key], encoding='latin-1')
 
@@ -222,7 +227,7 @@ class csv_dataset(data.Dataset):
         self.X = data[text_key].values.tolist()
         try:
             self.Y = data[label_key].values
-        except:
+        except Exception as e:
             self.Y = np.ones(len(self.X))*-1
 
         if binarize_sent:
