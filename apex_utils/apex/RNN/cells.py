@@ -4,7 +4,11 @@ import torch.nn.functional as F
 
 from .RNNBackend import RNNCell
 
-from torch.nn._functions.thnn import rnnFusedPointwise as fusedBackend
+# from torch.nn._functions.thnn import rnnFusedPointwise as fusedBackend
+_VF = torch._C._VariableFunctions
+_rnn_impls = {
+    'LSTM': _VF.lstm,
+}
 
 import math 
 
@@ -63,7 +67,8 @@ def mLSTMCell(input, hidden, w_ih, w_hh, w_mih, w_mhh, b_ih=None, b_hh=None):
         m = F.linear(input, w_mih) * F.linear(hidden[0], w_mhh)
         hgates = F.linear(m, w_hh)
 
-        state = fusedBackend.LSTMFused.apply
+        state = _rnn_impls['LSTM']
+        # state = fusedBackend.LSTMFused.apply
         return state(igates, hgates, hidden[1], b_ih, b_hh)
 
     hx, cx = hidden

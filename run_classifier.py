@@ -54,10 +54,10 @@ def get_model(args):
     concat_pools = model_args.concat_max, model_args.concat_min, model_args.concat_mean
     if args.model == 'transformer':
         model = SentimentClassifier(model_args.model, ntokens, None, None, None, model_args.classifier_hidden_layers, model_args.classifier_dropout,
-                                      None, concat_pools, model_args)
+                                      None, concat_pools, False, model_args)
     else:
         model = SentimentClassifier(model_args.model, ntokens, model_args.emsize, model_args.nhid, model_args.nlayers,
-                                      model_args.classifier_hidden_layers, model_args.classifier_dropout, model_args.all_layers, concat_pools, model_args)
+                                      model_args.classifier_hidden_layers, model_args.classifier_dropout, model_args.all_layers, concat_pools, False, model_args)
     args.heads_per_class = model_args.heads_per_class
     args.use_softmax = model_args.use_softmax
 
@@ -188,3 +188,6 @@ def main():
     print('writing results to '+args.write_results)
     writer = get_writer(ypred)
     train_data.dataset.write(writer, path=args.write_results)
+
+if __name__ == '__main__':
+    main()

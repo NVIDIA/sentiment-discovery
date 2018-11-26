@@ -211,7 +211,7 @@ def add_run_classifier_args(parser):
     group.add_argument('--write-results', type=str, default='',
                         help='path to location for CSV -- write results of model on data \
                              input strings + results and variances. Will not write if empty') 
-    return data_config, data_parser, group, parser
+    return data_config, data_group, group, parser
 
 def add_finetune_classifier_args(parser):
     data_config, data_group = configure_data(parser)

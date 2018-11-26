@@ -133,7 +133,6 @@ class SentimentClassifier(nn.Module):
     def __init__(self, model_type, ntoken, ninp, nhid, nlayers, classifier_hidden_layers=None, dropout=0.5, all_layers=False, concat_pools=[False] * 3, get_lm_out=False, args=None):
         super().__init__()
         self.model_type = model_type
-        self.using_logreg = args.use_logreg
         if model_type == 'transformer':
             self.encoder = TransformerFeaturizer(get_lm_out, args)
             out_size = args.decoder_embed_dim
