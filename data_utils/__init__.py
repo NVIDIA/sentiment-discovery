@@ -6,7 +6,7 @@ from .loaders import DataLoader, ShardLoader
 from .preprocess import tokenize_str_batch, binarize_labels, process_str
 from .datasets import json_dataset, csv_dataset, split_ds, get_processed_path, ConcatDataset, SplitDataset, data_shard
 from .lazy_loader import exists_lazy, make_lazy, lazy_array_loader
-from .tokenization import Tokenization, CommandToken, Tokenizer, CharacterLevelTokenizer, make_tokenizer
+from .tokenization import Tokenization, CommandToken, Tokenizer, CharacterLevelTokenizer, make_tokenizer, make_elmo_batch
 
 TRAIN_DATA = 0
 VAL_DATA = 1

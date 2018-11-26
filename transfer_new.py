@@ -21,9 +21,10 @@ from sklearn.metrics import matthews_corrcoef
 from fp16 import FP16_Module, FP16_Optimizer
 from apex.reparameterization import apply_weight_norm, remove_weight_norm
 
-from model import RNNFeaturizer, TransformerFeaturizer
+from model import RNNFeaturizer, TransformerFeaturizer, ElmoFeaturizer
 from configure_data import configure_data
 from arguments import add_general_args, add_model_args, add_classifier_model_args, add_sentiment_transfer_args
+from data_utils import make_elmo_batch
 
 def get_data_and_args():
     parser = argparse.ArgumentParser(description='PyTorch Sentiment Discovery Transfer Learning')
@@ -51,6 +52,8 @@ def get_model(args):
     concat_pools = [args.concat_max, args.concat_min, args.concat_mean]
     if args.model.lower() == 'transformer':
         model = TransformerFeaturizer(False, args)
+    elif args.model.lower() == 'elmo':
+        model = ElmoFeaturizer(args)
     else:
         model = RNNFeaturizer(args.model, ntokens, args.emsize, args.nhid, args.nlayers,
                                           0.0, args.all_layers, concat_pools, residuals=args.residuals)
@@ -95,26 +98,27 @@ def transform(model, text, args):
         Process batch and return tuple of (text, text label, text length) long tensors.
         Text is returned in column format with (time, batch) dimensions.
         '''
-        text = batch['text'][0]
-        timesteps = batch['length']
+        if args.model.lower() == 'elmo':
+            text, timesteps = make_elmo_batch(batch['text'][1])
+        else:
+            text = batch['text'][0].t()
+            timesteps = batch['length']
         labels = batch['label']
         text = Variable(text).long()
         timesteps = Variable(timesteps).long()
         labels = Variable(labels).long()
         if args.cuda:
             text, timesteps, labels = text.cuda(), timesteps.cuda(), labels.cuda()
-        return text.t(), labels, timesteps-1
+        return text, labels, timesteps-1
 
     def get_outs(text_batch, length_batch):
-        if args.model.lower() == 'transformer' or args.model.lower() == 'bert':
-            class_out, (lm_or_encoder_out, state) = model(text_batch, length_batch, args.get_hidden)
+        if args.model.lower() == 'transformer' or args.model.lower() == 'bert' or args.model.lower() == 'elmo':
+            cell_out, lm_or_encoder_out = model(text_batch, length_batch, args.get_hidden)
         else:
             model.encoder.rnn.reset_hidden(args.batch_size)
             for _ in range(1 + args.num_hidden_warmup):
-                class_out, (lm_or_encoder_out, state) = model(text_batch, length_batch, args.get_hidden)
-        if args.use_softmax:
-            class_out = torch.max(class_out,-1)[1].view(-1,1)
-        return class_out, (lm_or_encoder_out, state)
+                cell_out, lm_or_encoder_out = model(text_batch, length_batch, args.get_hidden)
+        return cell_out, lm_or_encoder_out
 
     tstart = start = time.time()
     n = 0
@@ -124,9 +128,8 @@ def transform(model, text, args):
         for i, data in tqdm(enumerate(text), total=len_ds, unit="batch", desc="transform", position=1,  ncols=100):
             text_batch, labels_batch, length_batch = get_batch(data)
             # get batch size and reset hidden state with appropriate batch size
-            batch_size = text_batch.size(1)
+            batch_size = length_batch.size(0)
             n += batch_size
-            model.rnn.reset_hidden(batch_size)
             # extract batch of features from text batch
             cell, _ = get_outs(text_batch, length_batch)
             cell = cell.float()

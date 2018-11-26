@@ -80,9 +80,19 @@ def add_unsupervised_data_args(parser):
 def add_model_args(parser):
     args, _ = parser.parse_known_args()
     if args.model.lower() == 'transformer' or args.model.lower() == 'bert':
-        return add_transformer_args(parser) 
+        return add_transformer_args(parser)
+    elif args.model.lower() == 'elmo':
+        return add_elmo_args(parser)
     else:
         return add_recurrent_args(parser)
+
+def add_elmo_args(parser):
+    group = parser.add_argument_group('elmo', 'arguments for building an elmo model')
+    group.add_argument('--options-file', type=str, default='https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_options.json',
+                        help='path to option file to load elmo configuration')
+    group.add_argument('--weights-file', type=str, default='https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_weights.hdf5',
+                        help='path to weights file to load trained elmo weights')
+    return parser
 
 def add_recurrent_args(parser):
     group = parser.add_argument_group('recurrent', 'arguments for building recurrent nets')
@@ -211,7 +221,7 @@ def add_run_classifier_args(parser):
     group.add_argument('--write-results', type=str, default='',
                         help='path to location for CSV -- write results of model on data \
                              input strings + results and variances. Will not write if empty') 
-    return data_config, data_parser, group, parser
+    return data_config, data_group, group, parser
 
 def add_finetune_classifier_args(parser):
     data_config, data_group = configure_data(parser)

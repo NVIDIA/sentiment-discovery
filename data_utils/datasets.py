@@ -217,7 +217,7 @@ class csv_dataset(data.Dataset):
             if isinstance(label_key, list):
                 cols += label_key
             else:
-                cols += label_key
+                cols += [label_key]
             data = pd.read_csv(self.path, sep=self.delim, usecols=cols, encoding='latin-1')
         except:
             data = pd.read_csv(self.path, sep=self.delim, usecols=[text_key], encoding='latin-1')

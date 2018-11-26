@@ -5,6 +5,8 @@ import torch.nn as nn
 from torch.autograd import Variable
 import torch.nn.functional as F
 
+from allennlp.modules.elmo import Elmo
+
 from apex import RNN
 from .transformer_utils import Embedding
 from .transformer import TransformerDecoder
@@ -283,7 +285,10 @@ class TransformerFeaturizer(nn.Module):
         encoder_out = self.encoder(input, get_attention=get_hidden, chkpt_grad=chkpt_grad, **kwargs)
         if get_hidden:
             encoder_out = encoder_out[0]
-        feats = encoder_out[seq_len.squeeze(), torch.arange(seq_len.size(0))]
+        if seq_len is not None:
+            feats = encoder_out[seq_len.squeeze(), torch.arange(seq_len.size(0))]
+        else:
+            feates = encoder_out[-1, :]
         if get_hidden:
             feats = [feats, None]
         lm_out = None
@@ -299,3 +304,22 @@ class BERTModel(nn.Module):
 
     def forward(self, input_tokens, chkpt_grad=False, **kwargs):
         return self.encoder(input_tokens.t(), chkpt_grad=chkpt_grad)
+
+class ElmoFeaturizer(nn.Module):
+    def __init__(self, args):
+        super(ElmoFeaturizer, self).__init__()
+        self.options_file = args.options_file
+        self.weights_file = args.weights_file
+        self.encoder = Elmo(self.options_file, self.weights_file, 2, dropout=0.0)
+        self.out_size = self.encoder.get_output_dim()
+
+    def forward(self, input, seq_len=None, get_hidden=False, chkpt_grad=False, **kwargs):
+        embeddings = self.encoder(input)
+        embeddings = embeddings['elmo_representations'][-1]
+        if seq_len is not None:
+            feats = embeddings[torch.arange(seq_len.size(0)), seq_len.squeeze()]
+        else:
+            feats = embeddings[:,-1]
+        if get_hidden:
+            feats = [feats, None]
+        return feats, None

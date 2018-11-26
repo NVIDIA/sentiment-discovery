@@ -1,8 +1,19 @@
 from collections import namedtuple
 import random
 import os
+import re
 
+import torch
 import sentencepiece as spm
+from allennlp.modules.elmo import batch_to_ids
+
+def tokenize_words(text):
+    return re.findall(r"\w+|[^\w\s]", text, re.UNICODE)
+
+def make_elmo_batch(text_batch):
+    tokenized_batch = [tokenize_words(text) for text in text_batch]
+    timesteps = [len(t) for t in tokenized_batch]
+    return batch_to_ids(tokenized_batch), torch.LongTensor(timesteps)
 
 def make_tokenizer(tokenizer_type, corpus, model_path=None, vocab_size=None, model_type='bpe', pad_token=0, character_coverage=1.0):
     tokenizer_class = tokenizer_type

@@ -16,7 +16,8 @@ from apex.reparameterization import apply_weight_norm, remove_weight_norm
 
 from model import SentimentClassifier
 from configure_data import configure_data
-from arguments import add_general_args, add_model_args, add_classifier_model_args, add_run_classifier_data_args
+from arguments import add_general_args, add_model_args, add_classifier_model_args, add_run_classifier_args
+from data_utils import make_elmo_batch
 
 def get_data_and_args():
     parser = argparse.ArgumentParser(description='PyTorch Sentiment Discovery Classification')
@@ -52,12 +53,12 @@ def get_model(args):
 
     ntokens = model_args.data_size
     concat_pools = model_args.concat_max, model_args.concat_min, model_args.concat_mean
-    if args.model == 'transformer':
+    if args.model == 'transformer' or args.model.lower() == 'elmo':
         model = SentimentClassifier(model_args.model, ntokens, None, None, None, model_args.classifier_hidden_layers, model_args.classifier_dropout,
-                                      None, concat_pools, model_args)
+                                      None, concat_pools, False, model_args)
     else:
         model = SentimentClassifier(model_args.model, ntokens, model_args.emsize, model_args.nhid, model_args.nlayers,
-                                      model_args.classifier_hidden_layers, model_args.classifier_dropout, model_args.all_layers, concat_pools, model_args)
+                                      model_args.classifier_hidden_layers, model_args.classifier_dropout, model_args.all_layers, concat_pools, False, model_args)
     args.heads_per_class = model_args.heads_per_class
     args.use_softmax = model_args.use_softmax
 
@@ -96,18 +97,21 @@ def classify(model, text, args):
     heads_per_class = args.heads_per_class
 
     def get_batch(batch):
-        text = batch['text'][0]
-        timesteps = batch['length']
+        if args.model.lower() == 'elmo':
+            text, timesteps = make_elmo_batch(batch['text'][1])
+        else:
+            text = batch['text'][0].t()
+            timesteps = batch['length']
         labels = batch['label']
         text = Variable(text).long()
         timesteps = Variable(timesteps).long()
         labels = Variable(labels).long()
         if args.cuda:
             text, timesteps, labels = text.cuda(), timesteps.cuda(), labels.cuda()
-        return text.t(), labels, timesteps-1
+        return text, labels, timesteps-1
 
     def get_outs(text_batch, length_batch):
-        if args.model.lower() == 'transformer' or args.model.lower() == 'bert':
+        if args.model.lower() == 'transformer' or args.model.lower() == 'bert' or args.model.lower() == 'elmo':
             class_out, (lm_or_encoder_out, state) = model(text_batch, length_batch, args.get_hidden)
         else:
             model.encoder.rnn.reset_hidden(args.batch_size)
@@ -124,7 +128,7 @@ def classify(model, text, args):
     with torch.no_grad():
         for i, data in tqdm(enumerate(text), total=len(text)):
             text_batch, labels_batch, length_batch = get_batch(data)
-            size = text_batch.size(1)
+            size = length_batch.size(0)
             n += size
             # get predicted probabilities given transposed text and lengths of text
             probs, _ = get_outs(text_batch, length_batch)
@@ -167,6 +171,7 @@ def main():
     (train_data, val_data, test_data), tokenizer, args = get_data_and_args()
     model = get_model(args)
 
+    print('got to classify')
     ypred, yvar = classify(model, train_data, args)
 
     save_root = ''
@@ -188,3 +193,6 @@ def main():
     print('writing results to '+args.write_results)
     writer = get_writer(ypred)
     train_data.dataset.write(writer, path=args.write_results)
+
+if __name__ =='__main__':
+    main()

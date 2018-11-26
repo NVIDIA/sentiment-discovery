@@ -31,6 +31,7 @@ from learning_rates import AnnealingLR, SlantedTriangularLR, ConstantLR
 from arguments import add_general_args, add_model_args, add_classifier_model_args, add_finetune_classifier_args
 from metric_utils import update_info_dict, get_metric
 from analysis import _binary_threshold, _neutral_threshold_two_output
+from data_utils import make_elmo_batch
 
 def get_data_and_args():
     parser = argparse.ArgumentParser(description='PyTorch Sentiment Discovery Transfer Learning')
@@ -58,6 +59,10 @@ def get_model_and_optim(args, train_data):
     ntokens = args.data_size
     concat_pools = args.concat_max, args.concat_min, args.concat_mean
     if args.model == 'transformer':
+        model = M.SentimentClassifier(args.model, ntokens, None, None, None, args.classifier_hidden_layers, args.classifier_dropout,
+                                      None, concat_pools, args.aux_lm_loss, args)
+    elif args.model.lower() == 'elmo':
+        args.aux_lm_loss = False
         model = M.SentimentClassifier(args.model, ntokens, None, None, None, args.classifier_hidden_layers, args.classifier_dropout,
                                       None, concat_pools, args.aux_lm_loss, args)
     else:
@@ -133,8 +138,11 @@ def get_supervised_batch(batch, use_cuda, model, ids=False, args=None, save_outp
     Process batch and return tuple of (text, text label, text length) long tensors.
     Text is returned in column format with (time, batch) dimensions.
     '''
-    text = batch['text'][0]
-    timesteps = batch['length']
+    if args.model.lower() == 'elmo':
+        text, timesteps = make_elmo_batch(batch['text'][1])
+    else:
+        text = batch['text'][0].t()
+        timesteps = batch['length']
     labels = batch['label']
     text = Variable(text).long()
     timesteps = Variable(timesteps).long()
@@ -149,13 +157,13 @@ def get_supervised_batch(batch, use_cuda, model, ids=False, args=None, save_outp
         labels = labels.view(-1, model.out_dim).float()
     if use_cuda:
         text, timesteps, labels = text.cuda(), timesteps.cuda(), labels.cuda()
-    return text.t(), labels, timesteps-1
+    return text, labels, timesteps-1
 
 def transform(model, text_batch, labels_batch, length_batch, args, LR=None):
     batch_size = text_batch.size(1)
 
     def get_outs():
-        if args.model.lower() == 'transformer' or args.model.lower() == 'bert':
+        if args.model.lower() == 'transformer' or args.model.lower() == 'bert' or args.model.lower() == 'elmo':
             class_out, (lm_or_encoder_out, state) = model(text_batch, length_batch, args.get_hidden)
         else:
             model.encoder.rnn.reset_hidden(args.batch_size)
@@ -374,29 +382,25 @@ def finetune(model, text, args, val_data=None, LR=None, reg_loss=None, tqdm_desc
         loss = classifier_loss
         classifier_loss = classifier_loss.clone() # save for reporting
         # Also compute multihead variance loss -- from classifier [divide by output size since it scales linearly]
-        multihead_variance_loss = model.classifier.get_last_layer_variance() / model.out_dim
         if args.aux_head_variance_loss_weight > 0.:
-            multihead_variance_loss *= args.aux_head_variance_loss_weight
-            loss += multihead_variance_loss
+            multihead_variance_loss = model.classifier.get_last_layer_variance() / model.out_dim
+            loss = loss + multihead_variance_loss * args.aux_head_variance_loss_weight
         # Divide by # batches? Since we're looking at the parameters here, and should be batch independent.
         # multihead_variance_loss *= batch_adjustment
 
-        # Compute LM loss, no matter what
-        lm_labels = text_batch[1:]
-        lm_losses = aux_loss_fn(lm_out[:-1].view(-1, lm_out.size(2)).contiguous().float(),
-                                  lm_labels.contiguous().view(-1))
+        if args.aux_lm_loss:
+            lm_labels = text_batch[1:]
+            lm_losses = aux_loss_fn(lm_out[:-1].view(-1, lm_out.size(2)).contiguous().float(),
+                                      lm_labels.contiguous().view(-1))
 
-        padding_mask = (torch.arange(lm_labels.size(0)).unsqueeze(1).cuda() > length_batch).float()
-        portion_unpadded = padding_mask.sum() / padding_mask.size(0)
-        lm_loss = portion_unpadded * torch.mean(lm_losses * (padding_mask.view(-1).float()))
+            padding_mask = (torch.arange(lm_labels.size(0)).unsqueeze(1).cuda() > length_batch).float()
+            portion_unpadded = padding_mask.sum() / padding_mask.size(0)
+            lm_loss = portion_unpadded * torch.mean(lm_losses * (padding_mask.view(-1).float()))
 
-        # Scale LM loss -- since it's so big
-        if args.aux_lm_loss_weight > 0.:
-            lm_loss = lm_loss * args.aux_lm_loss_weight
+            # Scale LM loss -- since it's so big
+            if args.aux_lm_loss_weight > 0.:
+                loss = loss + lm_loss * args.aux_lm_loss_weight
 
-        # Do we use the LM loss
-        if args.aux_lm_loss and args.aux_lm_loss_weight > 0.:
-            loss += lm_loss
         # Training
         if LR is not None:
             LR.optimizer.zero_grad()
@@ -410,8 +414,10 @@ def finetune(model, text, args, val_data=None, LR=None, reg_loss=None, tqdm_desc
             labels_batch = onehot(labels_batch.squeeze(), model.out_dim)
             class_out = onehot(torch.max(class_out, -1)[1].squeeze(), model.out_dim/heads_per_class)
         total_classifier_loss += classifier_loss.detach().cpu().numpy()
-        total_lm_loss += lm_loss.detach().cpu().numpy()
-        total_multihead_variance_loss += multihead_variance_loss.detach().cpu().numpy()
+        if args.aux_lm_loss:
+            total_lm_loss += lm_loss.detach().cpu().numpy()
+        if args.aux_head_variance_loss_weight > 0:
+            total_multihead_variance_loss += multihead_variance_loss.detach().cpu().numpy()
         for j in range(model.out_dim):
             info_dicts[math.floor(j/heads_per_class)] = update_info_dict(info_dicts[math.floor(j/heads_per_class)], labels_batch[:, j], class_out[:, j], thresholds[j])
         # Save, for overall thresholding (not on training)

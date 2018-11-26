@@ -4,7 +4,7 @@ import torch.nn.functional as F
 
 import numpy as np
 from itertools import chain
-from model import RNNFeaturizer, TransformerFeaturizer
+from model import RNNFeaturizer, TransformerFeaturizer, ElmoFeaturizer
 from .transformer_utils import GeLU
 
 class BinaryClassifier(nn.Module):
@@ -133,10 +133,12 @@ class SentimentClassifier(nn.Module):
     def __init__(self, model_type, ntoken, ninp, nhid, nlayers, classifier_hidden_layers=None, dropout=0.5, all_layers=False, concat_pools=[False] * 3, get_lm_out=False, args=None):
         super().__init__()
         self.model_type = model_type
-        self.using_logreg = args.use_logreg
         if model_type == 'transformer':
             self.encoder = TransformerFeaturizer(get_lm_out, args)
             out_size = args.decoder_embed_dim
+        elif model_type.lower() == 'elmo':
+            self.encoder = ElmoFeaturizer(args)
+            out_size = self.encoder.out_size
         else:
             # NOTE: Dropout is for Classifier. Add separate RNN dropout or via params, if needed.
             self.encoder = RNNFeaturizer(model_type, ntoken, ninp, nhid, nlayers, dropout=0.0, all_layers=all_layers,
