@@ -357,7 +357,10 @@ def main():
                 torch.save(model.state_dict(), args.save)
                 best_val_loss = val_loss
             if args.world_size == 1 or torch.distributed.get_rank() == 0:
-                os.remove(args.save+'.train_lock')
+                try:
+                    os.remove(args.save+'.train_lock')
+                except:
+                    pass
 #            if args.world_size > 1:
 #                torch.distributed.barrier()
             torch.cuda.synchronize()
