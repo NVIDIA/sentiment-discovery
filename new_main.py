@@ -43,7 +43,7 @@ def setup_model_and_optim(args, train_data, tokenizer):
 
 
     optim = None
-    if args.load != '':
+    if args.load is not None and args.load != '':
         sd = torch.load(args.load, map_location='cpu')
         if args.load_optim:
             #optim_sd = torch.load(os.path.join(os.path.dirname(args.load), 'optim.pt'), map_location='cpu')
