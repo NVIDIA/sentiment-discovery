@@ -597,8 +597,8 @@ def main():
                 text_batch, labels_batch, length_batch = get_supervised_batch(batch, args.cuda, model, args.ids, args, heads_per_class=args.heads_per_class)
                 # if args.non_binary_cols:
                 #     labels_batch = labels_batch[:,0]-labels_batch[:,1]+1
-                class_out, (encoder_out, _) = transform(model, text_batch, labels_batch, length_batch, args)
-                X_out.append(encoder_out.cpu().numpy())
+                _, (_, state) = transform(model, text_batch, labels_batch, length_batch, args)
+                X_out.append(state.cpu().numpy())
                 Y_out.append(labels_batch.cpu().numpy())
             X_out = np.concatenate(X_out)
             Y_out = np.concatenate(Y_out)
