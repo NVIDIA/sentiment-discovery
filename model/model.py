@@ -78,7 +78,6 @@ class RNNFeaturizer(nn.Module):
         self.aux_lm_loss = get_lm_out
         if self.aux_lm_loss:
             self.decoder = nn.Linear(nhid, ntoken)
-            self.decoder.load_state_dict(torch.load(open(args.load, 'rb'))['decoder'])
         self.concat_max, self.concat_min, self.concat_mean = concat_pools
         self.output_size = self.nhid if not self.all_layers else self.nhid * self.nlayers
         self.output_size *= (1 + sum(concat_pools))
@@ -174,13 +173,14 @@ class RNNFeaturizer(nn.Module):
         sd = {}
         sd['encoder'] = self.encoder.state_dict(destination=destination, prefix=prefix, keep_vars=keep_vars)
         sd['rnn'] = self.rnn.state_dict(destination=destination, prefix=prefix, keep_vars=keep_vars)
+        sd = {'encoder': sd}
         if self.aux_lm_loss:
             sd['decoder'] = self.decoder.state_dict(destination=destination, prefix=prefix, keep_vars=keep_vars)
         return sd
 
     def load_state_dict(self, state_dict, strict=True):
-        self.encoder.load_state_dict(state_dict['encoder'], strict=strict)
-        self.rnn.load_state_dict(state_dict['rnn'], strict=strict)
+        self.encoder.load_state_dict(state_dict['encoder']['encoder'], strict=strict)
+        self.rnn.load_state_dict(state_dict['encoder']['rnn'], strict=strict)
         if self.aux_lm_loss:
             self.decoder.load_state_dict(state_dict['decoder'], strict=strict)
 
@@ -290,6 +290,12 @@ class TransformerFeaturizer(nn.Module):
         if self.aux_lm_loss:
             lm_out = F.linear(encoder_out, self.encoder.encoder.embed_out)
         return feats, lm_out
+
+    def state_dict(self, destination=None, prefix='', keep_vars=False):
+        return self.encoder.state_dict(destination=destination, prefix=prefix, keep_vars=keep_vars)
+
+    def load_state_dict(self, state_dict, strict=True):
+        return self.encoder.load_state_dict(state_dict, strict=strict)
 
 class BERTModel(nn.Module):
     def __init__(self, args):

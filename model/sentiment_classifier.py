@@ -74,9 +74,10 @@ NONLINEARITY_MAP = {
 class MultiLayerBinaryClassifier(nn.Module):
     def __init__(self, input_layer_size, layer_sizes, dropout=0.1, init_dropout=True, heads_per_class=1, nonlinearity='PReLU', softmax=False):
         super().__init__()
-        if heads_per_class > 1:
+        self.heads_per_class = heads_per_class
+        if self.heads_per_class > 1:
             print('Using multiple heads per class: %d' % heads_per_class)
-            print(layer_sizes[-1])
+            layer_sizes = list(layer_sizes)
             layer_sizes[-1] = int(layer_sizes[-1]) * heads_per_class
         self.neurons = None
         self.layer_sizes = [input_layer_size] + list(map(int, layer_sizes))
@@ -100,11 +101,21 @@ class MultiLayerBinaryClassifier(nn.Module):
 
         self.model = nn.Sequential(*layer_list)
         self.neurons = None
+        self.softmax = softmax
 
         print('init MultiLayerBinaryClassifier with layers %s and dropout %s' % (self.layer_sizes, self.dropout))
 
     def forward(self, X, **kwargs):
-        return (self.model(X).float())
+        clf_out = self.model(X).float()
+        if self.heads_per_class <= 1:
+            return clf_out
+        clf_out = clf_out.view(clf_out.size(0), -1, self.heads_per_class)
+        probs = clf_out
+        if self.softmax:
+            probs = F.softmax(probs, 1)
+        clf_mean = probs.mean(dim=2)
+        clf_std = probs.std(dim=2)
+        return clf_out, clf_mean, clf_std
 
     # HACK -- parameter to measure *variation* between last layer of the MLP.
     # Why? To support multihead -- for the same category, where we want multiple heads to predict with different functions
@@ -125,7 +136,27 @@ class MultiLayerBinaryClassifier(nn.Module):
         return None
 
     def set_neurons(self, *args, **kwargs):
-        return None       
+        return None
+
+class MultiHeadBCELoss(torch.nn.BCELoss):
+    def __init__(self, weight=None, size_average=None, reduce=None, reduction='elementwise_mean', heads_per_class=1):
+        super(MultiHeadBCELoss, self).__init__(weight=weight, size_average=size_average, reduce=reduce, reduction=reduction)
+        self.heads_per_class = heads_per_class
+
+    def forward(self, input, target):
+        input = input.permute(0, 2, 1)
+        target = target.unsqueeze(1).expand(-1, self.heads_per_class, -1)
+        return super(MultiHeadBCELoss, self).forward(input, target)
+
+class MultiHeadCrossEntropyLoss(torch.nn.CrossEntropyLoss):
+    def __init__(self, weight=None, size_average=None, ignore_index=-100, reduce=None, reduction='elementwise_mean'):
+        super(MultiHeadCrossEntropyLoss, self).__init__(weight=weight, size_average=size_average, reduce=reduce, reduction=reduction, ignore_index=ignore_index)
+        self.heads_per_class = heads_per_class
+
+    def forward(self, input, target):
+        input = input.permute(0, 2, 1)
+        target = target.unsqueeze(1).expand(-1, self.heads_per_class)
+        return super(MultiHeadCrossEntropyLoss, self).forward(input, target)
 
 class SentimentClassifier(nn.Module):
     """Container module with an encoder, a recurrent module, and a decoder."""
