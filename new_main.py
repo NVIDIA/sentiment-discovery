@@ -53,12 +53,18 @@ def setup_model_and_optim(args, train_data, tokenizer):
         try:
             model.load_state_dict(sd)
         except:
-            apply_weight_norm(model, hook_child=False)
+            if hasattr(model, 'rnn'):
+                apply_weight_norm(model.rnn, hook_child=False)
+            else:
+                apply_weight_norm(model, hook_child=False)
             model.load_state_dict(sd)
             remove_weight_norm(model)
 
     if not args.no_weight_norm:
-        apply_weight_norm(model, hook_child=False)
+        if hasattr(model, 'rnn'):
+            apply_weight_norm(model.rnn, hook_child=False)
+        else:
+            apply_weight_norm(model, hook_child=False)
 
     if optim is None:
         optim_choice = 'Adam' if args.stlr_cut_frac else args.optim
@@ -348,12 +354,12 @@ def main():
                 print('entering eval')
                 val_loss = evaluate(val_data, model, criterion, args)
             print('-' * 89)
-            print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
-                  'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
+            print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.4f} | '
+                  'valid ppl {:8.4f}'.format(epoch, (time.time() - epoch_start_time),
                                              val_loss, math.exp(min(val_loss, 20))))
             print('-' * 89)
             # Save the model if the validation loss is the best we've seen so far.
-            if not best_val_loss or val_loss < best_val_loss and args.rank <= 0:
+            if (not best_val_loss or val_loss < best_val_loss) and args.rank <= 0:
                 torch.save(model.state_dict(), args.save)
                 best_val_loss = val_loss
             if args.world_size == 1 or torch.distributed.get_rank() == 0:
@@ -374,20 +380,18 @@ def main():
 
     # Load the best saved model.
     #if os.path.exists(args.save):
-    ##    with open(args.save, 'rb') as f:
     #    model.load_state_dict(torch.load(args.save, 'cpu'))
 
-    #if not args.no_weight_norm and args.rank <= 0:
-    #    remove_weight_norm(rnn_model)
-    #    with open(args.save, 'wb') as f:
-    #        torch.save(model.state_dict(), f)
+    # if not args.no_weight_norm and args.rank <= 0:
+    #    remove_weight_norm(model)
+    #    torch.save(model.state_dict(), args.save)
 
     if test_data is not None:
         # Run on test data.
         print('entering test')
         test_loss = evaluate(test_data, model, criterion, args)
         print('=' * 89)
-        print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
+        print('| End of training | test loss {:5.4f} | test ppl {:8.4f}'.format(
             test_loss, math.exp(min(test_loss, 20))))
         print('=' * 89)
 

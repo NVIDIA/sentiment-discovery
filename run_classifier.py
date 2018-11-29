@@ -8,6 +8,7 @@ from tqdm import tqdm
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
+import torch.nn.functional as F
 
 import numpy as np
 import pandas as pd
@@ -90,7 +91,7 @@ def classify(model, text, args):
     model.encoder.eval()
     model.classifier.eval()
     # Initialize data, append results
-    vars = np.array([])
+    stds = np.array([])
     labels = np.array([])
     first_label = True
     heads_per_class = args.heads_per_class
@@ -113,8 +114,8 @@ def classify(model, text, args):
             model.encoder.rnn.reset_hidden(args.batch_size)
             for _ in range(1 + args.num_hidden_warmup):
                 class_out, (lm_or_encoder_out, state) = model(text_batch, length_batch, args.get_hidden)
-        if args.use_softmax:
-            class_out = torch.max(class_out,-1)[1].view(-1,1)
+        if args.use_softmax and args.heads_per_class == 1:
+            class_out = F.softmax(class_out, -1)
         return class_out, (lm_or_encoder_out, state)
 
 
@@ -133,13 +134,12 @@ def classify(model, text, args):
                 first_label = False
                 labels = []
                 if heads_per_class > 1:
-                    vars = []
+                    stds = []
             # Save variances, and predictions
             # TODO: Handle multi-head [multiple classes out]
             if heads_per_class > 1:
-                prob_var = probs.view(probs.shape[0],-1,heads_per_class).contiguous().std(2)
-                vars.append(prob_var[:,:].data.cpu().numpy())
-                probs = probs.view(probs.shape[0],-1,heads_per_class).contiguous().mean(2)
+                _, probs, std = probs
+                stds.append(std[:,:].data.cpu().numpy())
             labels.append(probs[:,:].data.cpu().numpy())
 
             num_char = length_batch.sum().data[0]
@@ -156,18 +156,18 @@ def classify(model, text, args):
     if not first_label:
         labels = (np.concatenate(labels)) #.flatten())
         if heads_per_class > 1:
-            vars = (np.concatenate(vars))
+            stds = (np.concatenate(stds))
         else:
-            vars = np.zeros_like(labels)
+            stds = np.zeros_like(labels)
     print('%0.3f seconds to transform %d examples' %
                   (time.time() - tstart, n))
-    return labels, vars
+    return labels, stds
 
 def main():
     (train_data, val_data, test_data), tokenizer, args = get_data_and_args()
     model = get_model(args)
 
-    ypred, yvar = classify(model, train_data, args)
+    ypred, ystd = classify(model, train_data, args)
 
     save_root = ''
     save_root = os.path.join(save_root, args.save_probs)

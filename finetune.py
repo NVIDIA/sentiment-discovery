@@ -71,11 +71,9 @@ def get_model_and_optim(args, train_data):
     # load char embedding and recurrent encoder for featurization
     if args.load is not None and args.load != '':
         with open(args.load, 'rb') as f:
-            sd = x = torch.load(f)
+            sd = x = torch.load(f, 'cpu')
             if 'sd' in sd:
                 sd = sd['sd']
-            # if not args.load_finetuned and 'encoder' in sd:
-            #     sd = sd['encoder']
 
         if not args.load_finetuned:
             try:
@@ -456,7 +454,7 @@ def finetune(model, text, args, val_data=None, LR=None, reg_loss=None, tqdm_desc
         # In multihead case, look at class averages? Why? More predictive. Works especially well when we force single per-class threshold.
         for j in range(int(model.out_dim/heads_per_class)):
             std = None
-            if heads_per_class:
+            if heads_per_class > 1:
                 std = all_stds[:, j]
             info_dicts[j] = update_info_dict(info_dicts[j], all_labels[:, j], all_batches[:, j], thresholds[j], std=std)
 
