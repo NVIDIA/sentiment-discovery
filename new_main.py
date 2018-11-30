@@ -276,6 +276,7 @@ def train(epoch, model, optim, train_data, LR, LR_Warmer, criterion, args, total
     cur_time = time.time()
     elapsed = cur_time - start_time
     total_elapsed = cur_time - t0 + elapsed_time
+    cur_loss = total_loss.item() / args.log_interval
     log(epoch, max_iters, lr, elapsed * 1000/ elapsed_iters, total_elapsed,
         cur_loss, args.loss_scale if not args.fp16 else optim.loss_scale)
 

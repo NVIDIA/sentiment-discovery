@@ -17,7 +17,7 @@ from apex.reparameterization import apply_weight_norm, remove_weight_norm
 
 from model import SentimentClassifier
 from configure_data import configure_data
-from arguments import add_general_args, add_model_args, add_classifier_model_args, add_run_classifier_data_args
+from arguments import add_general_args, add_model_args, add_classifier_model_args, add_run_classifier_args
 
 def get_data_and_args():
     parser = argparse.ArgumentParser(description='PyTorch Sentiment Discovery Classification')
@@ -61,6 +61,10 @@ def get_model(args):
                                       model_args.classifier_hidden_layers, model_args.classifier_dropout, model_args.all_layers, concat_pools, False, model_args)
     args.heads_per_class = model_args.heads_per_class
     args.use_softmax = model_args.use_softmax
+    try:
+        args.classes = list(model_args.classes)
+    except:
+        args.classes = [args.label_key]
 
     if args.cuda:
         model.cuda()
@@ -142,7 +146,7 @@ def classify(model, text, args):
                 stds.append(std[:,:].data.cpu().numpy())
             labels.append(probs[:,:].data.cpu().numpy())
 
-            num_char = length_batch.sum().data[0]
+            num_char = length_batch.sum().item()
 
             end = time.time()
             elapsed_time = end - start
@@ -179,14 +183,30 @@ def main():
         exit()
 
     #TODO: Handle multilabel/softmax properly
-    def get_writer(probs):
-        header = ['predicted proba'] if not args.use_softmax else ['predicted']
+    def make_header(classes, heads_per_class=1):
+        header = []
+        for cls in classes:
+            header.append(cls + ' prob')
+            if heads_per_class > 1:
+                header.append(cls + ' std')
+        return header
+
+    def get_row(prob, std, classes, heads_per_class=1):
+        row = []
+        for i in range(len(classes)):
+            row.append(prob[i])
+            if heads_per_class > 1:
+                row.append(std[i])
+        return row 
+
+    def get_writer(probs, stds, classes, heads_per_class=1, softmax=False):
+        header = make_header(classes, heads_per_class) if not softmax else ['predicted']
         yield header
-        for prob in probs:
-            yield prob
+        for prob, std in zip(probs, stds):
+            yield get_row(prob, std, classes, heads_per_class)
 
     print('writing results to '+args.write_results)
-    writer = get_writer(ypred)
+    writer = get_writer(ypred, ystd, args.classes, args.heads_per_class)
     train_data.dataset.write(writer, path=args.write_results)
 
 if __name__ == '__main__':

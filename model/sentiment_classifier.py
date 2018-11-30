@@ -13,6 +13,7 @@ class BinaryClassifier(nn.Module):
 
         self.dense0 = nn.Linear(num_features, 1)
         self.neurons = None
+        self.thresholds = [.5]
         self.final = 1
         print('init BinaryClassifier with %d features' % num_features)
 
@@ -46,18 +47,25 @@ class BinaryClassifier(nn.Module):
         values = self.dense0.weight[:, neurons]
         return neurons, values
 
+    def get_thresholds(self):
+        return self.thresholds
+
     def state_dict(self, destination=None, prefix='', keep_vars=False):
         sd = self.dense0.state_dict(destination=destination, prefix=prefix, keep_vars=keep_vars)
         sd['neurons'] = self.neurons
+        sd['thresholds'] = self.thresholds
         return sd
 
     def load_state_dict(self, state_dict, strict=True):
         if 'neurons' in state_dict:
             self.neurons = state_dict['neurons']
 
+        if 'thresholds' in state_dict:
+            self.thresholds = state_dict['thresholds']
+
         sd = {}
         for k, v in state_dict.items():
-            if k != 'neurons':
+            if k != 'neurons' and k != 'thresholds':
                 sd[k] = v
 
         self.dense0.load_state_dict(sd, strict=strict)
@@ -180,6 +188,7 @@ class SentimentClassifier(nn.Module):
             self.classifier = MultiLayerBinaryClassifier(self.encoder_dim, classifier_hidden_layers, dropout=dropout, heads_per_class=args.heads_per_class, softmax=args.use_softmax)
         self.out_dim = self.classifier.final
         self.neurons_ = None
+        self.thresholds_ = self.classifier.thresholds
         # If we want to output multiple heads, and average the output
         self.heads_per_class = args.heads_per_class
 
@@ -204,6 +213,15 @@ class SentimentClassifier(nn.Module):
         self.encoder.load_state_dict(state_dict['encoder'], strict=strict)
         self.classifier.load_state_dict(state_dict['classifier'], strict=strict)
         self.neurons = self.classifier.neurons
+        self.thresholds_ = self.classifier.thresholds
+
+    def get_thresholds(self):
+        return self.classifier.get_thresholds()
+
+    def set_thresholds(self, thresholds, dual_threshold=False):
+        rtn = self.classifier.set_thresholds(thresholds, dual_threshold=dual_threshold)
+        self.thresholds_ = self.classifier.thresholds
+        return rtn
 
     def get_neurons(self, **kwargs):
         return self.classifier.get_neurons(**kwargs)
@@ -212,6 +230,15 @@ class SentimentClassifier(nn.Module):
         rtn = self.classifier.set_neurons(num_neurons=num_neurons)
         self.neurons_ = self.classifier.neurons
         return rtn
+
+    @property
+    def thresholds(self):
+        return self.thresholds_
+
+    @thresholds.setter
+    def thresholds(self, val):
+        self.thresholds_ = val
+        self.classifier.thresholds = val
 
     @property
     def neurons(self):

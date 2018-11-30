@@ -153,7 +153,7 @@ def add_transformer_args(parser):
     return parser
 
 def add_classifier_model_args(parser):
-    group = parser.add_argument_group('finetune', 'arguments used in training a classifier on top of a language model')
+    group = parser.add_argument_group('classifier', 'arguments used in training a classifier on top of a language model')
     group.add_argument('--classifier-hidden-layers', default=None, nargs='+',
                         help='sizes of hidden layers for binary classifier on top of language model, so excluding the input layer and final "1"')
     group.add_argument('--classifier-hidden-activation', type=str, default='PReLU',
