@@ -14,7 +14,7 @@ if __name__ == '__main__':
     env = os.environ.copy()
     env['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
 
-    base_command = "python3 finetune.py --warmup-epochs 0.5 --epochs 20 " \
+    base_command = "python3 finetune_classifier.py --warmup-epochs 0.5 --epochs 20 " \
         + "--optim Adam --all-metrics --automatic-thresholding --batch-size 16 " \
         + "--aux-lm-loss --aux-lm-loss-weight 0.02 --classifier-hidden-layers 1 --classifier-dropout 0.3 " 
 

@@ -8,17 +8,29 @@ from model import RNNFeaturizer, TransformerFeaturizer
 from .transformer_utils import GeLU
 
 class BinaryClassifier(nn.Module):
-    def __init__(self, num_features=4096):
+    def __init__(self, num_features=4096, **kwargs):
         super().__init__()
-
+        self.nclasses = 2
         self.dense0 = nn.Linear(num_features, 1)
         self.neurons = None
-        self.thresholds = [.5]
+        self.thresholds = torch.tensor(np.array([.5])).float()
         self.final = 1
+        self.device = -1
         print('init BinaryClassifier with %d features' % num_features)
 
+    def cuda(self, device=None):
+        super(BinaryClassifier, self).cuda(device)
+        self.device = device
+        self.thresholds = self.thresholds.cuda(device)
+
+    def cpu(self):
+        super(BinaryClassifier, self).cpu()
+        self.device = -1
+        self.thresholds = self.thresholds.cpu()
+
     def forward(self, X, **kwargs):
-        return torch.sigmoid(self.linear(X)).float()
+        out = torch.sigmoid(self.linear(X)).float()
+        return threshold_predictions(out, self.thresholds)
         #return F.sigmoid(self.linear(X), dim=-1).float()
 
     def linear(self, X):
@@ -50,10 +62,22 @@ class BinaryClassifier(nn.Module):
     def get_thresholds(self):
         return self.thresholds
 
+    def set_thresholds(self, thresholds, **kwargs):
+        if isinstance(thresholds, float):
+            thresholds = [thresholds]
+        if isinstance(thresholds, (list, tuple, np.ndarray, np.generic)):
+            thresholds = torch.tensor(thresholds).float()
+        if self.device == -1:
+            thresholds = thresholds.cpu()
+        else:
+            thresholds = thresholds.cuda(self.device)
+        self.thresholds = thresholds
+        return None
+
     def state_dict(self, destination=None, prefix='', keep_vars=False):
         sd = self.dense0.state_dict(destination=destination, prefix=prefix, keep_vars=keep_vars)
         sd['neurons'] = self.neurons
-        sd['thresholds'] = self.thresholds
+        sd['thresholds'] = self.get_thresholds()
         return sd
 
     def load_state_dict(self, state_dict, strict=True):
@@ -61,7 +85,7 @@ class BinaryClassifier(nn.Module):
             self.neurons = state_dict['neurons']
 
         if 'thresholds' in state_dict:
-            self.thresholds = state_dict['thresholds']
+            self.set_thresholds(state_dict['thresholds'])
 
         sd = {}
         for k, v in state_dict.items():
@@ -80,9 +104,15 @@ NONLINEARITY_MAP = {
 }
 
 class MultiLayerBinaryClassifier(nn.Module):
-    def __init__(self, input_layer_size, layer_sizes, dropout=0.1, init_dropout=True, heads_per_class=1, nonlinearity='PReLU', softmax=False):
-        super().__init__()
+    def __init__(self, input_layer_size, layer_sizes, dropout=0.1, init_dropout=True, heads_per_class=1,
+                 nonlinearity='PReLU', softmax=False, double_threshold=False, dual_threshold=False, **kwargs):
+        super(MultiLayerBinaryClassifier, self).__init__()
         self.heads_per_class = heads_per_class
+        self.nclasses = int(layer_sizes[-1])
+        self.thresholds = torch.tensor(np.array([.5]*self.nclasses)).float()
+        self.double_threshold = double_threshold
+        self.dual_threshold = dual_threshold
+        self.device = -1
         if self.heads_per_class > 1:
             print('Using multiple heads per class: %d' % heads_per_class)
             layer_sizes = list(layer_sizes)
@@ -111,40 +141,110 @@ class MultiLayerBinaryClassifier(nn.Module):
         self.neurons = None
         self.softmax = softmax
 
-        print('init MultiLayerBinaryClassifier with layers %s and dropout %s' % (self.layer_sizes, self.dropout))
+        print('init MultiLayerBinaryClassifier with layers %s and dropout %s' % (self.layer_sizes[1:], self.dropout))
 
     def forward(self, X, **kwargs):
-        clf_out = self.model(X).float()
+        out = self.model(X).float()
         if self.heads_per_class <= 1:
-            return clf_out
-        clf_out = clf_out.view(clf_out.size(0), -1, self.heads_per_class)
-        probs = clf_out
+            if self.softmax:
+                clf_out = torch.max(out, -1, keepdim=True)[1]
+            else:
+                out, clf_out = threshold_predictions(out, self.thresholds, double_threshold=self.double_threshold,
+                                                     dual_threshold=self.dual_threshold)
+            return out, clf_out
+        out = out.view(out.size(0), -1, self.heads_per_class)
+        probs = out
         if self.softmax:
             probs = F.softmax(probs, 1)
         clf_mean = probs.mean(dim=2)
+        if self.softmax:
+            clf_out = torch.max(clf_mean, -1, keepdim=True)[1]
+        else:
+            clf_mean, clf_out = threshold_predictions(clf_mean, self.thresholds, double_threshold=self.double_threshold,
+                                                      dual_threshold=self.dual_threshold)
         clf_std = probs.std(dim=2)
-        return clf_out, clf_mean, clf_std
+        return out, clf_mean, clf_std, clf_out
 
     # HACK -- parameter to measure *variation* between last layer of the MLP.
     # Why? To support multihead -- for the same category, where we want multiple heads to predict with different functions
     # (similar to training a mixture of models) -- useful for uncertainty sampling
-    def get_last_layer_variance(self):
+    def get_last_layer_variance(self, eps=.00001):
         final_layer_weight = self.final_layer.weight
         fl_norm = torch.norm(final_layer_weight,2,1)
         final_layer_weight = final_layer_weight * (1.0 / fl_norm).unsqueeze(1)
         final_layer_dot = final_layer_weight @ torch.transpose(final_layer_weight, 0, 1)
         # Compute matrix of all NxN layers -- in normalized form
         final_layer_dot_loss = (torch.norm(final_layer_dot,2,1) - 1.)
-        final_layer_dot_loss = final_layer_dot_loss/(self.final_layer.weight.shape[0]+0.00001)
+        final_layer_dot_loss = final_layer_dot_loss/(self.final_layer.weight.shape[0]+eps)
         final_layer_dot_loss = torch.sum(final_layer_dot_loss)
         # Return the average loss -- per dot comparison.
         return final_layer_dot_loss 
+
+    def cuda(self, device=None):
+        super(MultiLayerBinaryClassifier, self).cuda(device)
+        self.device = device
+        self.thresholds = self.thresholds.cuda(device)
+
+    def cpu(self):
+        super(MultiLayerBinaryClassifier, self).cpu()
+        self.device = -1
+        self.thresholds = self.thresholds.cpu()
+
+    def get_thresholds(self):
+        return self.thresholds
+
+    def set_thresholds(self, thresholds, double_threshold=False, dual_threshold=False, **kwargs):
+        self.dual_threshold = dual_threshold
+        self.double_threshold = double_threshold
+        if isinstance(thresholds, float):
+            thresholds = [thresholds]
+        if isinstance(thresholds, (list, tuple, np.ndarray, np.generic)):
+            thresholds = torch.tensor(thresholds).float()
+        if self.device == -1:
+            thresholds = thresholds.cpu()
+        else:
+            thresholds = thresholds.cuda(self.device)
+        self.thresholds = thresholds
+        return None
+
+    def state_dict(self, destination=None, prefix='', keep_vars=False):
+        sd = {}
+        sd['sd'] = super(MultiLayerBinaryClassifier, self).state_dict(destination=destination, prefix=prefix, keep_vars=keep_vars)
+        sd['thresholds'] = self.get_thresholds()
+        sd['dual_threshold'] = self.dual_threshold
+        sd['double_threshold'] = self.double_threshold
+        return sd
+
+    def load_state_dict(self, state_dict, strict=True):
+        double_threshold = state_dict['double_threshold'] if 'double_threshold' in state_dict else False
+        dual_threshold = state_dict['dual_threshold'] if 'dual_threshold' in state_dict else False
+        self.set_thresholds(state_dict['thresholds'], double_threshold, dual_threshold)
+        return super(MultiLayerBinaryClassifier, self).load_state_dict(state_dict['sd'], strict=strict)        
 
     def get_neurons(self, *args, **kwargs):
         return None
 
     def set_neurons(self, *args, **kwargs):
         return None
+
+def threshold_predictions(predictions, thresholds, double_threshold=False, dual_threshold=False):
+    if double_threshold:
+        positive = (predictions > thresholds.max()).float()
+        neutral = ((1-positive) * (predictions > thresholds.min()).float())*.5
+        return predictions, (positive+neutral)
+    preds = (predictions > thresholds).float()
+    if dual_threshold:
+        positive = preds[:,0]
+        negative = preds[:,1]
+        equals = (positive==negative).float().view(-1,1)
+        preds = torch.cat([preds*(1-equals), equals.view(-1,1)], dim=-1)
+        predictions = torch.cat([predictions, XOR(predictions[:,0], predictions[:,1]).view(-1, 1)], dim=-1)
+        # print(preds, predictions)
+        # exit()
+    return predictions, preds
+
+def XOR(A, B):
+    return A+B-(2*A*B)
 
 class MultiHeadBCELoss(torch.nn.BCELoss):
     def __init__(self, weight=None, size_average=None, reduce=None, reduction='elementwise_mean', heads_per_class=1):
@@ -183,14 +283,27 @@ class SentimentClassifier(nn.Module):
         self.encoder_dim = out_size
 
         if classifier_hidden_layers is None:
-            self.classifier = BinaryClassifier(num_features=self.encoder_dim)
+            self.classifier = BinaryClassifier(num_features=self.encoder_dim, double_threshold=args.double_threshold, dual_threshold=args.dual_threshold)
         else:
-            self.classifier = MultiLayerBinaryClassifier(self.encoder_dim, classifier_hidden_layers, dropout=dropout, heads_per_class=args.heads_per_class, softmax=args.use_softmax)
+            self.classifier = MultiLayerBinaryClassifier(self.encoder_dim, classifier_hidden_layers, dropout=dropout, heads_per_class=args.heads_per_class,
+                                                         softmax=args.use_softmax, double_threshold=args.double_thresh, dual_threshold=args.dual_thresh and not args.joint_binary_train)
         self.out_dim = self.classifier.final
+        self.nclasses = self.classifier.nclasses
         self.neurons_ = None
-        self.thresholds_ = self.classifier.thresholds
+        self.thresholds = self.classifier.thresholds
         # If we want to output multiple heads, and average the output
         self.heads_per_class = args.heads_per_class
+
+    def cuda(self, device=None):
+        self.encoder.cuda(device)
+        self.classifier.cuda(device)
+        return self
+
+    def cpu(self):
+        self.encoder.cpu()
+        self.classifier.cpu()
+        return self
+
 
     def forward(self, input, seq_len=None, get_hidden=False):
         hidden, lm_out = self.encoder(input, seq_len, get_hidden)
@@ -213,14 +326,15 @@ class SentimentClassifier(nn.Module):
         self.encoder.load_state_dict(state_dict['encoder'], strict=strict)
         self.classifier.load_state_dict(state_dict['classifier'], strict=strict)
         self.neurons = self.classifier.neurons
-        self.thresholds_ = self.classifier.thresholds
+        self.thresholds = self.classifier.thresholds
 
     def get_thresholds(self):
         return self.classifier.get_thresholds()
 
-    def set_thresholds(self, thresholds, dual_threshold=False):
-        rtn = self.classifier.set_thresholds(thresholds, dual_threshold=dual_threshold)
-        self.thresholds_ = self.classifier.thresholds
+    def set_thresholds(self, thresholds, double_threshold=False, dual_threshold=False):
+        rtn = self.classifier.set_thresholds(thresholds, double_threshold=double_threshold,
+                                             dual_threshold=dual_threshold)
+        self.thresholds = self.classifier.thresholds
         return rtn
 
     def get_neurons(self, **kwargs):
@@ -230,15 +344,6 @@ class SentimentClassifier(nn.Module):
         rtn = self.classifier.set_neurons(num_neurons=num_neurons)
         self.neurons_ = self.classifier.neurons
         return rtn
-
-    @property
-    def thresholds(self):
-        return self.thresholds_
-
-    @thresholds.setter
-    def thresholds(self, val):
-        self.thresholds_ = val
-        self.classifier.thresholds = val
 
     @property
     def neurons(self):

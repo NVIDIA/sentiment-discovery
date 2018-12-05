@@ -47,11 +47,8 @@ def add_general_args(parser):
                         help='One of PyTorch\'s optimizers (Adam, SGD, etc). Default: Adam')
     group.add_argument('--chkpt-grad', action='store_true',
                         help='checkpoint gradients to allow for training with larger models and sequences')
-    group.add_argument('--ids', action='store_true',
-                        help='specify that the data is formatted as ids')
     group.add_argument('--multinode-init', action='store_true',
                         help='initialize multinode. Environment variables should be set as according to https://pytorch.org/docs/stable/distributed.html')
-    
     return parser
 
 def add_unsupervised_data_args(parser):
@@ -71,10 +68,12 @@ def add_unsupervised_data_args(parser):
                              help="""number of iterations per epoch to run training for""")
     group.add_argument('--eval-iters', type=int, default=100,
                              help="""number of iterations per epoch to run validation/test for""")
+    group.add_argument('--linear-decay', action='store_true',
+                             help='set learning rate to decay linearly')
     group.add_argument('--stlr-cut-frac', type=float, default=None,
                              help='what proportion of iterations to peak the slanted triangular learning rate')
     group.add_argument('--warmup', type=float, default=0,
-                        help='percentage of data to warmup on (.03 = 3% of all training iters). Default 0')
+                             help='percentage of data to warmup on (.03 = 3% of all training iters). Default 0')
     return data_config, parser
 
 def add_model_args(parser):
@@ -154,6 +153,8 @@ def add_transformer_args(parser):
 
 def add_classifier_model_args(parser):
     group = parser.add_argument_group('classifier', 'arguments used in training a classifier on top of a language model')
+    group.add_argument('--max-seq-len', type=int, default=None,
+                        help='maximum sequence length to use for classification. Transformer uses a lot of memory and needs shorter sequences.')
     group.add_argument('--classifier-hidden-layers', default=None, nargs='+',
                         help='sizes of hidden layers for binary classifier on top of language model, so excluding the input layer and final "1"')
     group.add_argument('--classifier-hidden-activation', type=str, default='PReLU',
@@ -177,6 +178,14 @@ def add_classifier_model_args(parser):
     group.add_argument('--heads-per-class', type=int, default=1,
                        help='set > 1 for multiple heads per class prediction (variance, regularlization)')
     parser.add_argument('--use-softmax', action='store_true', help='use softmax for classification')
+    group.add_argument('--double-thresh', action='store_true',
+                       help='whether to report all metrics at once')
+    group.add_argument('--dual-thresh', action='store_true',
+                        help='for 2 columns positive and negative, thresholds classes s.t. positive, negative, neutral labels are available')
+    group.add_argument('--joint-binary-train', action='store_true',
+                       help='Train with dual thresholded (positive/negative/neutral) classes and other normal binary classes.\
+                             Arguments to non-binary-cols must be passed with positive negative classes first.\
+                             Ex: `--non-binary-cols positive negative <other classes>`')
 
     group.set_defaults(epochs=5)
     return parser
@@ -248,17 +257,13 @@ def add_finetune_classifier_args(parser):
                        help='Set true for single threshold per class (multiple heads). Why? Less overfit.')
     group.add_argument('--use-class-multihead-average', action='store_true',
                        help='Use average output for multihead per class -- not necessary to use with --class-single-threshold [just average the thresholds]')
-    group.add_argument('--save-test-preds', type=str, default='/home/adlr-sent.cosmos433/tmp_raul/finetune_results.txt',
-                       help='path to save finetune test results to')
     group.add_argument('--thresh-test-preds', type=str, default=None,
                        help='path to thresholds for test outputs')
-    group.add_argument('--double-thresh', action='store_true',
-                       help='whether to report all metrics at once')
-    group.add_argument('--metric', type=str, default='f1',
-                       help='what metric to measure performance (save best model) with [acc, f1, mcc, all]')
+    group.add_argument('--report-metric', type=str, default='f1', choices=['jacc', 'acc', 'f1', 'mcc', 'precision', 'recall', 'var', 'all'],
+                       help='what metric to report performance (save best model)')
     group.add_argument('--all-metrics', action='store_true',
-                       help='whether to report all metrics at once')
-    group.add_argument('--threshold-metric', type=str, default='jacc',
+                       help='Overloads report metrics and reports all metrics at once')
+    group.add_argument('--threshold-metric', type=str, default='f1', choices=['jacc', 'acc', 'f1', 'mcc', 'precision', 'recall', 'var', 'all'],
                        help='which metric to use when choosing ideal thresholds?')
     group.add_argument('--micro', action='store_true',
                        help='whether to use micro averaging for metrics')
@@ -266,11 +271,10 @@ def add_finetune_classifier_args(parser):
                        help='HACK: Pass int (1000 for example) to tweak individual thresholds toward best global average [good for SemEval]. Will increase threshold on rare, hard to measure, categories.')
     group.add_argument('--save-finetune', action='store_true',
                        help='save finetuned models at every epoch of finetuning')
-    group.add_argument('--model-version-name', type=str, default='test',
+    group.add_argument('--model-version-name', type=str, default='classifier',
                        help='space to version model name -- for saving')
     group.add_argument('--automatic-thresholding', action='store_true')
     group.add_argument('--report-no-thresholding', action='store_true')
-    group.add_argument('--dual-threshold', action='store_true')
     group.add_argument('--decay-style', type=str, default=None, help='one of constant(None), linear, cosine, or exponential')
     group.add_argument('--warmup-epochs', type=float, default=0.)
     group.add_argument('--decay-epochs', type=float, default=-1, help='number of epochs to decay for. if -1 decays for all of training')

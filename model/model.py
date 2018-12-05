@@ -231,7 +231,7 @@ class TransformerDecoderModel(nn.Module):
         Overrides the method in nn.Module; compared with that method this
         additionally "upgrades" state_dicts from old checkpoints.
         """
-        self.upgrade_state_dict(state_dict)
+        state_dict = self.upgrade_state_dict(state_dict)
         super().load_state_dict(state_dict, strict)
 
     def upgrade_state_dict(self, state_dict):
@@ -242,6 +242,12 @@ class TransformerDecoderModel(nn.Module):
                 m.upgrade_state_dict(state_dict)
 
         self.apply(do_upgrade)
+        sd = {}
+        for k,v in state_dict.items():
+            if k.startswith('decoder'):
+                k = k.replace('decoder', 'encoder')
+            sd[k] = v
+        return sd
 
     def make_generation_fast_(self, **kwargs):
         """Optimize model for faster generation."""

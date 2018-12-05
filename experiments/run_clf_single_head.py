@@ -21,7 +21,7 @@ if __name__ == '__main__':
 
     plutchik_cols = ['anger', 'anticipation', 'disgust', 'fear', 'joy', 'sadness', 'surprise', 'trust']
 
-    base_command = "python3 finetune.py --data {train} --valid {val} --test {test} --warmup-epochs 0.5 --epochs 20 " \
+    base_command = "python3 finetune_classifier.py --data {train} --valid {val} --test {test} --warmup-epochs 0.5 --epochs 20 " \
         + "--text-key {text_key} --optim Adam --label-key {label_key} --all-metrics --automatic-thresholding --batch-size 16 " \
         + "--aux-lm-loss --aux-lm-loss-weight 0.02 --classifier-hidden-layers 1 --classifier-dropout 0.3 "
 
