@@ -35,12 +35,16 @@ if __name__ == '__main__':
         formatted_base_command = base_command.format(label_key=label_key, train=args.train, val=args.val, test=args.test, text_key='title')
         transformer_command = formatted_base_command + transformer_options
         print('*' * 100)
-        print("EXPERIMENT: ELMO, {}, {}, {}".format(label_key, args.train, args.val))
+        print("EXPERIMENT: Transformer, {}, {}, {}".format(label_key, args.train, args.val))
         print('*' * 100)
+        sys.stdout.flush()
+        sys.stderr.flush()
         subprocess.call(transformer_command.split(), stdout=sys.stdout, stderr=sys.stderr, env=env)
 
         mlstm_command = formatted_base_command + mlstm_options
         print('*' * 100)
         print("EXPERIMENT: mLSTM, {}, {}, {}".format(label_key, args.train, args.val))
         print('*' * 100)
+        sys.stdout.flush()
+        sys.stderr.flush()
         subprocess.call(mlstm_command.split(), stdout=sys.stdout, stderr=sys.stderr, env=env)

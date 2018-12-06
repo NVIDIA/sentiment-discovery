@@ -22,7 +22,7 @@ if __name__ == '__main__':
     binary_cols = ' '.join(['positive', 'negative'])
 
     base_command = "python3 finetune_classifier.py --data {train} --valid {val} --test {test} --warmup-epochs 0.5 --epochs 20 " \
-        + "--text-key {text_key} --optim Adam --all-metrics --automatic-thresholding --batch-size 16 --dual-thresh " \
+        + "--text-key {text_key} --optim Adam --all-metrics --threshold-metric acc --automatic-thresholding --batch-size 16 --dual-thresh " \
         + "--aux-lm-loss --aux-lm-loss-weight 0.02 --classifier-hidden-layers 4096 2048 1024 2 --classifier-dropout 0.3 --non-binary-cols " + binary_cols + ' '
 
     transformer_options = "--lr 1e-5 --tokenizer-type SentencePieceTokenizer --tokenizer-path imdb_sst_ama_32k_tokenizer.model --vocab-size 32000 --decoder-layers 12 "\
@@ -36,10 +36,14 @@ if __name__ == '__main__':
     print('*' * 100)
     print("EXPERIMENT: Transformer, {}, {}, {}".format('binary', args.train, args.val))
     print('*' * 100)
+    sys.stdout.flush()
+    sys.stderr.flush()
     subprocess.call(transformer_command.split(), stdout=sys.stdout, stderr=sys.stderr, env=env)
 
     mlstm_command = formatted_base_command + mlstm_options
     print('*' * 100)
     print("EXPERIMENT: mLSTM, {}, {}, {}".format('binary', args.train, args.val))
     print('*' * 100)
+    sys.stdout.flush()
+    sys.stderr.flush()
     subprocess.call(mlstm_command.split(), stdout=sys.stdout, stderr=sys.stderr, env=env)

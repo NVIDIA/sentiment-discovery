@@ -36,10 +36,14 @@ if __name__ == '__main__':
     print('*' * 100)
     print("EXPERIMENT: Transformer, {}, {}, {}".format('multihead', args.train, args.val))
     print('*' * 100)
+    sys.stdout.flush()
+    sys.stderr.flush()
     subprocess.call(transformer_command.split(), stdout=sys.stdout, stderr=sys.stderr, env=env)
 
     mlstm_command = formatted_base_command + mlstm_options
     print('*' * 100)
     print("EXPERIMENT: mLSTM, {}, {}, {}".format('multihead', args.train, args.val))
     print('*' * 100)
+    sys.stdout.flush()
+    sys.stderr.flush()
     subprocess.call(mlstm_command.split(), stdout=sys.stdout, stderr=sys.stderr, env=env)

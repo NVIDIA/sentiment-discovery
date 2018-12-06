@@ -4,6 +4,7 @@ import time
 import math
 import collections
 import pickle as pkl
+from tqdm import tqdm
 
 import torch
 import torch.nn as nn
@@ -15,89 +16,69 @@ import matplotlib.pyplot as plt
 
 import numpy as np
 from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import matthews_corrcoef
 
 from fp16 import FP16_Module, FP16_Optimizer
 from apex.reparameterization import apply_weight_norm, remove_weight_norm
 
-import model
-from model import DistributedDataParallel as DDP
+from model import RNNFeaturizer, TransformerFeaturizer
 from configure_data import configure_data
+from arguments import add_general_args, add_model_args, add_classifier_model_args, add_sentiment_transfer_args
 
-parser = argparse.ArgumentParser(description='PyTorch Sentiment Discovery Transfer Learning')
+def get_data_and_args():
+    parser = argparse.ArgumentParser(description='PyTorch Sentiment Discovery Transfer Learning')
 
-parser.add_argument('--model', type=str, default='mLSTM',
-                    help='type of recurrent net (RNNTanh, RNNReLU, LSTM, mLSTM, GRU')
-parser.add_argument('--emsize', type=int, default=64,
-                    help='size of word embeddings')
-parser.add_argument('--nhid', type=int, default=4096,
-                    help='number of hidden units per layer')
-parser.add_argument('--nlayers', type=int, default=1,
-                    help='number of layers')
-parser.add_argument('--all_layers', action='store_true',
-                    help='if more than one layer is used, extract features from all layers, not just the last layer')
-parser.add_argument('--epochs', type=int, default=40,
-                    help='number of epochs to run Logistic Regression')
-parser.add_argument('--seed', type=int, default=42,
-                    help='random seed')
-parser.add_argument('--load_model', type=str,  default='lang_model.pt',
-                    help='path to trained world language model')
-parser.add_argument('--save_results', type=str,  default='sentiment',
-                    help='path to save intermediate and final results of transfer')
-parser.add_argument('--fp16', action='store_true',
-                    help='Run model in pseudo-fp16 mode (fp16 storage fp32 math).')
-parser.add_argument('--neurons', default=1, type=int,
-                    help='number of nenurons to extract as features')
-parser.add_argument('--no_test_eval', action='store_true',
-                    help='whether to not evaluate the test model (useful when your test set has no labels)')
-parser.add_argument('--write_results', default='',
-                    help='write results of model on test (or train if none is specified) data to specified filepath [only supported for csv datasets currently]')
-parser.add_argument('--use_cached', action='store_true',
-                    help='reuse cached featurizations from a previous from last time')
-parser.add_argument('--drop_neurons', action='store_true',
-                    help='drop top neurons instead of keeping them')
-parser.add_argument('--data-path', type=str, default=None,
-                    help='path to singleton dataset (used for first-time tweet datasets)')
-parser.add_argument('--get-hidden', action='store_true',
-                    help='whether to use the hidden state (as opposed to cell state) as features for classifier')
+    parser = add_general_args(parser)
+    parser = add_model_args(parser)
+    parser = add_classifier_model_args(parser)
+    data_config, data_parser, sentiment_transfer_parser, parser = add_sentiment_transfer_args(parser)
+    args = parser.parse_args()
 
-data_config, data_parser = configure_data(parser)
-data_parser.set_defaults(split='1.', data=['data/binary_sst/train.csv'])
-data_parser.set_defaults(valid=['data/binary_sst/val.csv'], test=['data/binary_sst/test.csv'])
-args = parser.parse_args()
+    args.cuda = torch.cuda.is_available()
 
-args.cuda = torch.cuda.is_available()
+    if args.seed is not -1:
+        torch.manual_seed(args.seed)
+        if args.cuda:
+            torch.cuda.manual_seed(args.seed)
 
-if args.seed is not -1:
-    torch.manual_seed(args.seed)
+    (train_data, val_data, test_data), tokenizer = data_config.apply(args)
+    args.data_size = tokenizer.num_tokens
+    args.padding_idx = tokenizer.command_name_map['pad'].Id
+    return (train_data, val_data, test_data), tokenizer, args
+
+def get_model(args):
+    ntokens = args.data_size
+    concat_pools = [args.concat_max, args.concat_min, args.concat_mean]
+    if args.model.lower() == 'transformer':
+        model = TransformerFeaturizer(False, args)
+    else:
+        model = RNNFeaturizer(args.model, ntokens, args.emsize, args.nhid, args.nlayers,
+                                          0.0, args.all_layers, concat_pools, residuals=args.residuals)
     if args.cuda:
-        torch.cuda.manual_seed(args.seed)
+        model.cuda()
 
-(train_data, val_data, test_data), tokenizer = data_config.apply(args)
-ntokens = args.data_size
-model = model.RNNFeaturizer(args.model, ntokens, args.emsize, args.nhid, args.nlayers, 0.0, args.all_layers)
-if args.cuda:
-    model.cuda()
+    if args.fp16:
+        model.half()
 
-if args.fp16:
-    model.half()
+    if args.load is not None and args.load != '':
+        # load char embedding and recurrent encoder for featurization
+        with open(args.load, 'rb') as f:
+            sd = x = torch.load(f)
+            if 'sd' in sd:
+                sd = sd['sd']
+            if 'encoder' in sd:
+                sd = sd['encoder']
 
-# load char embedding and recurrent encoder for featurization
-with open(args.load_model, 'rb') as f:
-    sd = x = torch.load(f)
-    if 'sd' in sd:
-        sd = sd['sd']
-    if 'encoder' in sd:
-        sd = sd['encoder']
+        try:
+            model.load_state_dict(sd)
+        except:
+            # if state dict has weight normalized parameters apply and remove weight norm to model while loading sd
+            apply_weight_norm(model)
+            model.load_state_dict(sd)
+            remove_weight_norm(model)
+    return model
 
-try:
-    model.load_state_dict(sd)
-except:
-    # if state dict has weight normalized parameters apply and remove weight norm to model while loading sd
-    apply_weight_norm(model.rnn)
-    model.load_state_dict(sd)
-    remove_weight_norm(model)
-
-def transform(model, text):
+def transform(model, text, args):
     '''
     Apply featurization `model` to extract features from text in data loader.
     Featurization model should return cell state not hidden state.
@@ -114,30 +95,38 @@ def transform(model, text):
         Process batch and return tuple of (text, text label, text length) long tensors.
         Text is returned in column format with (time, batch) dimensions.
         '''
-        text = batch['text']
+        text = batch['text'][0]
         timesteps = batch['length']
         labels = batch['label']
-        text = Variable(text[0]).long()
+        text = Variable(text).long()
         timesteps = Variable(timesteps).long()
         labels = Variable(labels).long()
         if args.cuda:
             text, timesteps, labels = text.cuda(), timesteps.cuda(), labels.cuda()
         return text.t(), labels, timesteps-1
 
+    def get_outs(text_batch, length_batch):
+        if args.model.lower() == 'transformer' or args.model.lower() == 'bert':
+            cell_out, lm_or_encoder_out = model(text_batch, length_batch, args.get_hidden)
+        else:
+            model.encoder.rnn.reset_hidden(args.batch_size)
+            for _ in range(1 + args.num_hidden_warmup):
+                cell_out, lm_or_encoder_out = model(text_batch, length_batch, args.get_hidden)
+        return cell_out, lm_or_encoder_out
+
     tstart = start = time.time()
     n = 0
     len_ds = len(text)
     # Use no grad context for improving memory footprint/speed of inference
     with torch.no_grad():
-        for i, data in enumerate(text):
+        for i, data in tqdm(enumerate(text), total=len_ds, unit="batch", desc="transform", position=1,  ncols=100):
             text_batch, labels_batch, length_batch = get_batch(data)
             # get batch size and reset hidden state with appropriate batch size
             batch_size = text_batch.size(1)
             n += batch_size
-            model.rnn.reset_hidden(batch_size)
             # extract batch of features from text batch
-            cell = model(text_batch, length_batch, args.get_hidden)
-
+            cell, _ = get_outs(text_batch, length_batch)
+            cell = cell.float()
             if first_feature:
                 features = []
                 first_feature = False
@@ -145,21 +134,10 @@ def transform(model, text):
             labels.append(labels_batch.data.cpu().numpy())
             features.append(cell.data.cpu().numpy())
 
-            num_char = float(length_batch.sum().cpu().numpy())
-
-            end = time.time()
-            elapsed_time = end - start
-            total_time = end - tstart
-            start = end
-
-            s_per_batch = total_time / (i+1)
-            timeleft = (len_ds - (i+1)) * s_per_batch
-            ch_per_s = num_char / elapsed_time
-            print('batch {:5d}/{:5d} | ch/s {:.2E} | time {:.2E} | time left {:.2E}'.format(i+1, len_ds, ch_per_s, elapsed_time, timeleft))
-
     if not first_feature:
         features = (np.concatenate(features))
-        labels = (np.concatenate(labels).flatten())
+        labels = (np.concatenate(labels))
+
     print('%0.3f seconds to transform %d examples' %
                   (time.time() - tstart, n))
     return features, labels
@@ -176,7 +154,8 @@ def score_and_predict(model, X, Y):
     return accuracy, probs
 
 def train_logreg(trX, trY, vaX=None, vaY=None, teX=None, teY=None, penalty='l1', max_iter=100,
-        C=2**np.arange(-8, 1).astype(np.float), seed=42, model=None, eval_test=True, neurons=None, drop_neurons=False):
+        C=2**np.arange(-8, 1).astype(np.float), seed=42, model=None, eval_test=True, neurons=None,
+        drop_neurons=False, mcc=False):
     """
     slightly modified version of openai implementation https://github.com/openai/generating-reviews-discovering-sentiment/blob/master/utils.py
     if model is not None it doesn't train the model before scoring, it just scores the model
@@ -203,9 +182,16 @@ def train_logreg(trX, trY, vaX=None, vaY=None, teX=None, teY=None, penalty='l1',
             model = LogisticRegression(C=c, penalty=penalty, max_iter=max_iter, random_state=seed+i)
             model.fit(trX, trY)
             if vaX is not None:
-                score = model.score(vaX, vaY)
+                if mcc:
+                    score = matthews_corrcoef(model.predict(vaX), vaY)
+                else:
+                    score = model.score(vaX, vaY)
             else:
-                score = model.score(trX, trY)
+                if mcc:
+                    score = matthews_corrcoef(model.predict(trX), trY)
+                else:
+                    score = model.score(trX, trY)
+            print(score)
             scores.append(score)
             del model
         c = C[np.argmax(scores)]
@@ -314,164 +300,171 @@ def normalize(coef):
     coef = coef/norm
     return coef
 
-save_root = args.load_model
-save_root = save_root.replace('.current', '')
-save_root = os.path.splitext(save_root)[0]
-save_root += '_transfer'
-save_root = os.path.join(save_root, args.save_results)
-if not os.path.exists(save_root):
-    os.makedirs(save_root)
-print('writing results to '+save_root)
+def main():
+    (train_data, val_data, test_data), tokenizer, args = get_data_and_args()
+    model = get_model(args)
 
-# featurize train, val, test or use previously cached features if possible
-print('transforming train')
-if not (os.path.exists(os.path.join(save_root, 'trXt.npy')) and args.use_cached):
-    trXt, trY = transform(model, train_data)
-    np.save(os.path.join(save_root, 'trXt'), trXt)
-    np.save(os.path.join(save_root, 'trY'), trY)
-else:
-    trXt = np.load(os.path.join(save_root, 'trXt.npy'))
-    trY = np.load(os.path.join(save_root, 'trY.npy'))
-vaXt, vaY = None, None
-if val_data is not None:
-    print('transforming validation')
-    if not (os.path.exists(os.path.join(save_root, 'vaXt.npy')) and args.use_cached):
-        vaXt, vaY = transform(model, val_data)
-        np.save(os.path.join(save_root, 'vaXt'), vaXt)
-        np.save(os.path.join(save_root, 'vaY'), vaY)
+    save_root = '' if args.load is None else args.load
+    save_root = save_root.replace('.current', '')
+    save_root = os.path.splitext(save_root)[0]
+    save_root += '_transfer'
+    save_root = os.path.join(save_root, args.save_results)
+    if not os.path.exists(save_root):
+        os.makedirs(save_root)
+    print('writing results to '+save_root)
+
+    # featurize train, val, test or use previously cached features if possible
+    print('transforming train')
+    if not (os.path.exists(os.path.join(save_root, 'trXt.npy')) and args.use_cached):
+        trXt, trY = transform(model, train_data, args)
+        np.save(os.path.join(save_root, 'trXt'), trXt)
+        np.save(os.path.join(save_root, 'trY'), trY)
     else:
-        vaXt = np.load(os.path.join(save_root, 'vaXt.npy'))
-        vaY = np.load(os.path.join(save_root, 'vaY.npy'))
-teXt, teY = None, None
-if test_data is not None:
-    print('transforming test')
-    if not (os.path.exists(os.path.join(save_root, 'teXt.npy')) and args.use_cached):
-        teXt, teY = transform(model, test_data)
-        np.save(os.path.join(save_root, 'teXt'), teXt)
-        np.save(os.path.join(save_root, 'teY'), teY)
-    else:
-        teXt = np.load(os.path.join(save_root, 'teXt.npy'))
-        teY = np.load(os.path.join(save_root, 'teY.npy'))
+        trXt = np.load(os.path.join(save_root, 'trXt.npy'))
+        trY = np.load(os.path.join(save_root, 'trY.npy'))
+    vaXt, vaY = None, None
+    if val_data is not None:
+        print('transforming validation')
+        if not (os.path.exists(os.path.join(save_root, 'vaXt.npy')) and args.use_cached):
+            vaXt, vaY = transform(model, val_data, args)
+            np.save(os.path.join(save_root, 'vaXt'), vaXt)
+            np.save(os.path.join(save_root, 'vaY'), vaY)
+        else:
+            vaXt = np.load(os.path.join(save_root, 'vaXt.npy'))
+            vaY = np.load(os.path.join(save_root, 'vaY.npy'))
+    teXt, teY = None, None
+    if test_data is not None:
+        print('transforming test')
+        if not (os.path.exists(os.path.join(save_root, 'teXt.npy')) and args.use_cached):
+            teXt, teY = transform(model, test_data, args)
+            np.save(os.path.join(save_root, 'teXt'), teXt)
+            np.save(os.path.join(save_root, 'teY'), teY)
+        else:
+            teXt = np.load(os.path.join(save_root, 'teXt.npy'))
+            teY = np.load(os.path.join(save_root, 'teY.npy'))
 
-# train logistic regression model of featurized text against labels
-start = time.time()
-logreg_model, logreg_scores, logreg_probs, c, nnotzero = train_logreg(trXt, trY, vaXt, vaY, teXt, teY, max_iter=args.epochs, eval_test=not args.no_test_eval, seed=args.seed)
-end = time.time()
-elapsed_time = end - start
-
-with open(os.path.join(save_root, 'all_neurons_score.txt'), 'w') as f:
-    f.write(str(logreg_scores))
-with open(os.path.join(save_root, 'all_neurons_probs.pkl'), 'wb') as f:
-    pkl.dump(logreg_probs, f)
-with open(os.path.join(save_root, 'neurons.pkl'), 'wb') as f:
-    pkl.dump(logreg_model.coef_, f)
-
-print('all neuron regression took %s seconds'%(str(elapsed_time)))
-print(', '.join([str(score) for score in logreg_scores]), 'train, val, test accuracy for all neuron regression')
-print(str(c)+' regularization coefficient used')
-print(str(nnotzero) + ' features used in all neuron regression\n')
-
-# save a sentiment classification pytorch model
-sd = {}
-if not args.fp16:
-    clf_sd = {'weight': torch.from_numpy(logreg_model.coef_).float(), 'bias': torch.from_numpy(logreg_model.intercept_).float()}
-else:
-    clf_sd = {'weight': torch.from_numpy(logreg_model.coef_).half(), 'bias': torch.from_numpy(logreg_model.intercept_).half()}
-sd['classifier'] = clf_sd
-model.float().cpu()
-sd['encoder'] = model.state_dict()
-with open(os.path.join(save_root, 'classifier.pt'), 'wb') as f:
-    torch.save(sd, f)
-model.half()
-sd['encoder'] = model.state_dict()
-with open(os.path.join(save_root, 'classifier.pt.16'), 'wb') as f:
-    torch.save(sd, f)
-
-# extract sentiment neuron indices
-sentiment_neurons = get_top_k_neuron_weights(logreg_model, args.neurons)
-print('using neuron(s) %s as features for regression'%(', '.join([str(neuron) for neuron in list(sentiment_neurons.reshape(-1))])))
-
-# train logistic regression model of features corresponding to sentiment neuron indices against labels
-start = time.time()
-logreg_neuron_model, logreg_neuron_scores, logreg_neuron_probs, neuron_c, neuron_nnotzero = train_logreg(trXt, trY, vaXt, vaY, teXt, teY, max_iter=args.epochs, eval_test=not args.no_test_eval, seed=args.seed, neurons=sentiment_neurons, drop_neurons=args.drop_neurons)
-end = time.time()
-
-if args.drop_neurons:
-    with open(os.path.join(save_root, 'dropped_neurons_score.txt'), 'w') as f:
-        f.write(str(logreg_neuron_scores))
-
-    with open(os.path.join(save_root, 'dropped_neurons_probs.pkl'), 'wb') as f:
-        pkl.dump(logreg_neuron_probs, f)
-
-    print('%d dropped neuron regression took %s seconds'%(args.neurons, str(end-start)))
-    print(', '.join([str(score) for score in logreg_neuron_scores]), 'train, val, test accuracy for %d dropped neuron regression'%(args.neurons))
-    print(str(neuron_c)+' regularization coefficient used')
-
+    # train logistic regression model of featurized text against labels
     start = time.time()
-    logreg_neuron_model, logreg_neuron_scores, logreg_neuron_probs, neuron_c, neuron_nnotzero = train_logreg(trXt, trY, vaXt, vaY, teXt, teY, max_iter=args.epochs, eval_test=not args.no_test_eval, seed=args.seed, neurons=sentiment_neurons)
+    logreg_model, logreg_scores, logreg_probs, c, nnotzero = train_logreg(trXt, trY, vaXt, vaY, teXt, teY, max_iter=args.epochs, eval_test=not args.no_test_eval, seed=args.seed, mcc=args.mcc)
+    end = time.time()
+    elapsed_time = end - start
+
+    with open(os.path.join(save_root, 'all_neurons_score.txt'), 'w') as f:
+        f.write(str(logreg_scores))
+    with open(os.path.join(save_root, 'all_neurons_probs.pkl'), 'wb') as f:
+        pkl.dump(logreg_probs, f)
+    with open(os.path.join(save_root, 'neurons.pkl'), 'wb') as f:
+        pkl.dump(logreg_model.coef_, f)
+
+    print('all neuron regression took %s seconds'%(str(elapsed_time)))
+    print(', '.join([str(score) for score in logreg_scores]), 'train, val, test accuracy for all neuron regression')
+    print(str(c)+' regularization coefficient used')
+    print(str(nnotzero) + ' features used in all neuron regression\n')
+
+    # save a sentiment classification pytorch model
+    sd = {}
+    if not args.fp16:
+        clf_sd = {'weight': torch.from_numpy(logreg_model.coef_).float(), 'bias': torch.from_numpy(logreg_model.intercept_).float()}
+    else:
+        clf_sd = {'weight': torch.from_numpy(logreg_model.coef_).half(), 'bias': torch.from_numpy(logreg_model.intercept_).half()}
+    sd['classifier'] = clf_sd
+    model.float().cpu()
+    sd['encoder'] = model.state_dict()
+    with open(os.path.join(save_root, 'classifier.pt'), 'wb') as f:
+        torch.save(sd, f)
+    model.half()
+    sd['encoder'] = model.state_dict()
+    with open(os.path.join(save_root, 'classifier.pt.16'), 'wb') as f:
+        torch.save(sd, f)
+
+    # extract sentiment neuron indices
+    sentiment_neurons = get_top_k_neuron_weights(logreg_model, args.neurons)
+    print('using neuron(s) %s as features for regression'%(', '.join([str(neuron) for neuron in list(sentiment_neurons.reshape(-1))])))
+
+    # train logistic regression model of features corresponding to sentiment neuron indices against labels
+    start = time.time()
+    logreg_neuron_model, logreg_neuron_scores, logreg_neuron_probs, neuron_c, neuron_nnotzero = train_logreg(trXt, trY, vaXt, vaY, teXt, teY, max_iter=args.epochs, eval_test=not args.no_test_eval, seed=args.seed, neurons=sentiment_neurons, drop_neurons=args.drop_neurons, mcc=args.mcc)
     end = time.time()
 
-print('%d neuron regression took %s seconds'%(args.neurons, str(end-start)))
-print(', '.join([str(score) for score in logreg_neuron_scores]), 'train, val, test accuracy for %d neuron regression'%(args.neurons))
-print(str(neuron_c)+' regularization coefficient used')
+    if args.drop_neurons:
+        with open(os.path.join(save_root, 'dropped_neurons_score.txt'), 'w') as f:
+            f.write(str(logreg_neuron_scores))
 
-# log model accuracies, predicted probabilities, and weight/bias of regression model
+        with open(os.path.join(save_root, 'dropped_neurons_probs.pkl'), 'wb') as f:
+            pkl.dump(logreg_neuron_probs, f)
 
-with open(os.path.join(save_root, 'all_neurons_score.txt'), 'w') as f:
-    f.write(str(logreg_scores))
+        print('%d dropped neuron regression took %s seconds'%(args.neurons, str(end-start)))
+        print(', '.join([str(score) for score in logreg_neuron_scores]), 'train, val, test accuracy for %d dropped neuron regression'%(args.neurons))
+        print(str(neuron_c)+' regularization coefficient used')
 
-with open(os.path.join(save_root, 'neurons_score.txt'), 'w') as f:
-    f.write(str(logreg_neuron_scores))
+        start = time.time()
+        logreg_neuron_model, logreg_neuron_scores, logreg_neuron_probs, neuron_c, neuron_nnotzero = train_logreg(trXt, trY, vaXt, vaY, teXt, teY, max_iter=args.epochs, eval_test=not args.no_test_eval, seed=args.seed, neurons=sentiment_neurons, mcc=args.mcc)
+        end = time.time()
 
-with open(os.path.join(save_root, 'all_neurons_probs.pkl'), 'wb') as f:
-    pkl.dump(logreg_probs, f)
+    print('%d neuron regression took %s seconds'%(args.neurons, str(end-start)))
+    print(', '.join([str(score) for score in logreg_neuron_scores]), 'train, val, test accuracy for %d neuron regression'%(args.neurons))
+    print(str(neuron_c)+' regularization coefficient used')
 
-with open(os.path.join(save_root, 'neurons_probs.pkl'), 'wb') as f:
-    pkl.dump(logreg_neuron_probs, f)
+    # log model accuracies, predicted probabilities, and weight/bias of regression model
 
-with open(os.path.join(save_root, 'neurons.pkl'), 'wb') as f:
-    pkl.dump(logreg_model.coef_, f)
+    with open(os.path.join(save_root, 'all_neurons_score.txt'), 'w') as f:
+        f.write(str(logreg_scores))
 
-with open(os.path.join(save_root, 'neuron_bias.pkl'), 'wb') as f:
-    pkl.dump(logreg_model.intercept_, f)
+    with open(os.path.join(save_root, 'neurons_score.txt'), 'w') as f:
+        f.write(str(logreg_neuron_scores))
 
-#Plot feats
-use_feats, use_labels = teXt, teY
-if use_feats is None:
-    use_feats, use_labels = vaXt, vaY
-if use_feats is None:
-    use_feats, use_labels = trXt, trY
-try:
-    plot_logits(save_root, use_feats, use_labels, sentiment_neurons)
-except:
-    print('no labels to plot logits for')
+    with open(os.path.join(save_root, 'all_neurons_probs.pkl'), 'wb') as f:
+        pkl.dump(logreg_probs, f)
 
-plot_weight_contribs_and_save(logreg_model.coef_, os.path.join(save_root, 'weight_vis.png'))
+    with open(os.path.join(save_root, 'neurons_probs.pkl'), 'wb') as f:
+        pkl.dump(logreg_neuron_probs, f)
+
+    with open(os.path.join(save_root, 'neurons.pkl'), 'wb') as f:
+        pkl.dump(logreg_model.coef_, f)
+
+    with open(os.path.join(save_root, 'neuron_bias.pkl'), 'wb') as f:
+        pkl.dump(logreg_model.intercept_, f)
+
+    #Plot feats
+    use_feats, use_labels = teXt, teY
+    if use_feats is None:
+        use_feats, use_labels = vaXt, vaY
+    if use_feats is None:
+        use_feats, use_labels = trXt, trY
+    try:
+        plot_logits(save_root, use_feats, use_labels, sentiment_neurons)
+    except:
+        print('no labels to plot logits for')
+
+    plot_weight_contribs_and_save(logreg_model.coef_, os.path.join(save_root, 'weight_vis.png'))
 
 
-print('results successfully written to ' + save_root)
-if args.write_results == '':
-    exit()
+    print('results successfully written to ' + save_root)
+    if args.write_results == '':
+        exit()
 
-def get_csv_writer(feats, top_neurons, all_proba, neuron_proba):
-    """makes a generator to be used in data_utils.datasets.csv_dataset.write()"""
-    header = ['prob w/ all', 'prob w/ %d neuron(s)'%(len(top_neurons),)]
-    top_feats = feats[:, top_neurons]
-    header += ['neuron %s'%(str(x),) for x in top_neurons]
+    def get_csv_writer(feats, top_neurons, all_proba, neuron_proba):
+        """makes a generator to be used in data_utils.datasets.csv_dataset.write()"""
+        header = ['prob w/ all', 'prob w/ %d neuron(s)'%(len(top_neurons),)]
+        top_feats = feats[:, top_neurons]
+        header += ['neuron %s'%(str(x),) for x in top_neurons]
 
-    yield header
+        yield header
 
-    for i, _ in enumerate(top_feats):
-        row = []
-        row.append(all_proba[i])
-        row.append(neuron_proba[i])
-        row.extend(list(top_feats[i].reshape(-1)))
-        yield row
+        for i, _ in enumerate(top_feats):
+            row = []
+            row.append(all_proba[i])
+            row.append(neuron_proba[i])
+            row.extend(list(top_feats[i].reshape(-1)))
+            yield row
 
-data, use_feats = test_data, teXt
-if use_feats is None:
-    data, use_feats = val_data, vaXt
-if use_feats is None:
-    data, use_feats = train_data, trXt
-csv_writer = get_csv_writer(use_feats, sentiment_neurons, logreg_probs[-1], logreg_neuron_probs[-1])
-data.dataset.write(csv_writer, path=args.write_results)
+    data, use_feats = test_data, teXt
+    if use_feats is None:
+        data, use_feats = val_data, vaXt
+    if use_feats is None:
+        data, use_feats = train_data, trXt
+    csv_writer = get_csv_writer(use_feats, sentiment_neurons, logreg_probs[-1], logreg_neuron_probs[-1])
+    data.dataset.write(csv_writer, path=args.write_results)
+
+if __name__ == '__main__':
+    main()
