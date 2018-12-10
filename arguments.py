@@ -1,3 +1,11 @@
+###############################################################################
+# BSD 3-Clause License
+#
+# Copyright (c) 2018, NVIDIA CORPORATION. All rights reserved.
+#
+# Author & Contact: Raul Puri (raulp@nvidia.com)
+###############################################################################
+
 from configure_data import configure_data
 
 def add_general_args(parser):

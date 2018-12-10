@@ -1,3 +1,16 @@
+###############################################################################
+# BSD 3-Clause License
+#
+# Copyright (c) 2018, NVIDIA CORPORATION. All rights reserved.
+#   
+# Copyright (c) 2017, Facebook, inc. All rights reserved.
+###############################################################################
+'''
+Code adapted from https://github.com/pytorch/fairseq/blob/master/fairseq/models/transformer.py
+Introduced optimal gradient checkpointing for intermediate layers
+'''
+
+
 import math
 import torch
 import torch.nn as nn

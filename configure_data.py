@@ -120,48 +120,50 @@ def get_split(opt):
 def configure_data(parser):
     """add cmdline flags for configuring datasets"""
     main_parser = parser
-    parser = parser.add_argument_group('data options')
-    parser.add_argument('--data', nargs='+', default=['./data/imdb/unsup.json'],
+    group = parser.add_argument_group('data options')
+    group.add_argument('--data', nargs='+', default=['./data/imdb/unsup.json'],
                         help="""Filename for training""")
-    parser.add_argument('--valid', nargs='*', default=None,
+    group.add_argument('--valid', nargs='*', default=None,
                         help="""Filename for validation""")
-    parser.add_argument('--test', nargs='*', default=None,
+    group.add_argument('--test', nargs='*', default=None,
                         help="""Filename for testing""")
-    parser.add_argument('--process-fn', type=str, default='process_str', choices=['process_str', 'process_tweet'],
+    group.add_argument('--process-fn', type=str, default='process_str', choices=['process_str', 'process_tweet'],
                         help='what preprocessing function to use to process text. One of [process_str, process_tweet].')
-    parser.add_argument('--batch-size', type=int, default=128,
+    group.add_argument('--batch-size', type=int, default=128,
                         help='Data Loader batch size')
-    parser.add_argument('--eval-batch-size', type=int, default=0,
+    group.add_argument('--eval-batch-size', type=int, default=0,
                         help='Data Loader batch size for evaluation datasets')
-    parser.add_argument('--data-size', type=int, default=256,
+    group.add_argument('--data-size', type=int, default=256,
                         help='number of tokens in data')
-    parser.add_argument('--loose-json', action='store_true',
+    group.add_argument('--loose-json', action='store_true',
                         help='Use loose json (one json-formatted string per newline), instead of tight json (data file is one json string)')
-    parser.add_argument('--preprocess', action='store_true',
+    group.add_argument('--preprocess', action='store_true',
                         help='force preprocessing of datasets')
-    parser.add_argument('--delim', default=',',
+    group.add_argument('--delim', default=',',
                         help='delimiter used to parse csv testfiles')
-    parser.add_argument('--non-binary-cols', nargs='*', default=None,
+    group.add_argument('--non-binary-cols', nargs='*', default=None,
                         help='labels for columns to non-binary dataset [only works for csv datasets]')
-    parser.add_argument('--split', default='1.',
+    group.add_argument('--split', default='1.',
                         help='comma-separated list of proportions for training, validation, and test split')
-    parser.add_argument('--text-key', default='sentence',
+    group.add_argument('--text-key', default='sentence',
                         help='key to use to extract text from json/csv')
-    parser.add_argument('--label-key', default='label',
+    group.add_argument('--label-key', default='label',
                         help='key to use to extract labels from json/csv')
-    parser.add_argument('--eval-text-key', default=None,
+    group.add_argument('--eval-text-key', default=None,
                         help='key to use to extract text from json/csv evaluation datasets')
-    parser.add_argument('--eval-label-key', default=None,
+    group.add_argument('--eval-label-key', default=None,
                         help='key to use to extract labels from json/csv evaluation datasets')
     # tokenizer arguments
-    parser.add_argument('--tokenizer-type', type=str, default='CharacterLevelTokenizer', choices=['CharacterLevelTokenizer', 'SentencePieceTokenizer'],
+    group.add_argument('--tokenizer-type', type=str, default='CharacterLevelTokenizer', choices=['CharacterLevelTokenizer', 'SentencePieceTokenizer'],
                         help='what type of tokenizer to use')
-    parser.add_argument('--tokenizer-model-type', type=str, default='bpe', choices=['bpe', 'char', 'unigram', 'word'],
+    group.add_argument('--tokenizer-model-type', type=str, default='bpe', choices=['bpe', 'char', 'unigram', 'word'],
                         help='Model type to use for sentencepiece tokenization')
-    parser.add_argument('--vocab-size', type=int, default=256,
+    group.add_argument('--vocab-size', type=int, default=256,
                         help='vocab size to use for non-character-level tokenization')
-    parser.add_argument('--tokenizer-path', type=str, default='tokenizer.model',
+    group.add_argument('--tokenizer-path', type=str, default='tokenizer.model',
                         help='path used to save/load sentencepiece tokenization models')
+    # These are options that are relevant to data loading functionality, but are not meant to be exposed to the command line user.
+    # These options are intneded to be set in code by specific scripts.
     defaults = {
                 'world_size': 1,
                 'rank': -1,
@@ -174,4 +176,4 @@ def configure_data(parser):
                 'eval_seq_length': 256,
                 'samples_per_shard': 1000
                }
-    return DataConfig(main_parser, defaults=defaults), parser
+    return DataConfig(main_parser, defaults=defaults), group

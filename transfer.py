@@ -68,14 +68,17 @@ def get_model(args):
                 sd = sd['sd']
             if 'lm_encoder' in sd:
                 sd = sd['lm_encoder']
-
         try:
             model.load_state_dict(sd)
         except:
             # if state dict has weight normalized parameters apply and remove weight norm to model while loading sd
-            apply_weight_norm(model)
+            if hasattr(model, 'rnn'):
+                apply_weight_norm(model.rnn)
+            else:
+                apply_weight_norm(model)
             model.load_state_dict(sd)
             remove_weight_norm(model)
+
     return model
 
 def transform(model, text, args):
@@ -109,7 +112,7 @@ def transform(model, text, args):
         if args.model.lower() == 'transformer' or args.model.lower() == 'bert':
             cell_out, lm_or_encoder_out = model(text_batch, length_batch, args.get_hidden)
         else:
-            model.lm_encoder.rnn.reset_hidden(args.batch_size)
+            model.rnn.reset_hidden(args.batch_size)
             for _ in range(1 + args.num_hidden_warmup):
                 cell_out, lm_or_encoder_out = model(text_batch, length_batch, args.get_hidden)
         return cell_out, lm_or_encoder_out
@@ -369,11 +372,11 @@ def main():
         clf_sd = {'weight': torch.from_numpy(logreg_model.coef_).half(), 'bias': torch.from_numpy(logreg_model.intercept_).half()}
     sd['classifier'] = clf_sd
     model.float().cpu()
-    sd['encoder'] = model.state_dict()
+    sd['lm_encoder'] = model.state_dict()
     with open(os.path.join(save_root, 'classifier.pt'), 'wb') as f:
         torch.save(sd, f)
     model.half()
-    sd['encoder'] = model.state_dict()
+    sd['lm_encoder'] = model.state_dict()
     with open(os.path.join(save_root, 'classifier.pt.16'), 'wb') as f:
         torch.save(sd, f)
 
