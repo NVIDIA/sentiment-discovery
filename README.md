@@ -34,10 +34,12 @@ The model's performance as a whole will increase as it processes more data.
      * [Model/Optimization Robustness](./analysis/unsupervised.md#modeloptimization-robustness)
   * [Reproducing Results](./analysis/reproduction.md)
      * [Training](./analysis/reproduction.md#training)
-        * [Training Setup](./analysis/reproduction.md#training-set-up)
+        * [mLSTM Training Setup](./analysis/reproduction.md#mlstm-training-set-up)
+        * [Transformer Training Setup](./analysis/reproduction.md#transformer-training-set-up)
      * [FP16 Training](./analysis/reproduction.md#fp16-training)
-     * [8K Model Training](./analysis/reproduction.md#going-bigger-with-large-models)
+     * [Large Model Training](./analysis/reproduction.md#going-bigger-with-large-models)
      * [Transfer](./analysis/reproduction.md#transfer)
+     * [Finetuning Classifiers](./analysis/reproduction.md#finetuning-classifiers)
   * [Data Parallel Scalability](./analysis/scale.md)
      * [PyTorch + GIL](./analysis/scale.md#pytorch-gil)
   * [Open Questions](./analysis/questions.md)
@@ -75,10 +77,10 @@ We've also included our trained 8192-d mlstm models in fp16:
  * [Binary SST (FP16)]() [649 MB]
  * [IMDB (FP16)]() [649 MB]
  
-Each file contains a PyTorch `state_dict` consisting of a language model (encoder+decoder keys) trained on Amazon reviews and a binary sentiment classifier (classifier key) trained with transfer learning on Binary SST/IMDB.
+Each file has a dictionary containing a PyTorch `state_dict` consisting of a language model (lm_encoder keys) trained on Amazon reviews and a classifier (classifier key) as well as accompanying `args` necessary to run a model with that `state_dict`. 
 
 ### Data Downloads
-We've provided the Binary Stanford Sentiment Treebank (Binary SST) and IMDB Movie Review datasets as part of this repository. In order to train on the amazon dataset please download the "aggressively deduplicated data" version from Julian McAuley's original [site](http://jmcauley.ucsd.edu/data/amazon/). Access requests to the dataset should be approved instantly. While using the dataset make sure to load it with the `-loose_json` flag.
+We've provided the Binary Stanford Sentiment Treebank (Binary SST) and IMDB Movie Review datasets as part of this repository. In order to train on the amazon dataset please download the "aggressively deduplicated data" version from Julian McAuley's original [site](http://jmcauley.ucsd.edu/data/amazon/). Access requests to the dataset should be approved instantly. While using the dataset make sure to load it with the `--loose-json` flag.
 
 ## Usage
 In addition to providing easily reusable code of the core functionalities (models, distributed, fp16, etc.) of this work, we also provide scripts to perform the high-level functionalities of the original paper:
@@ -110,11 +112,10 @@ Saves model to `lang_model.pt` by default.
 ```
 python3 pretrain.py                                                               #train a large model on imdb
 python3 pretrain.py --model LSTM --nhid 512                                       #train a small LSTM instead
-python3 pretrain.py --fp16 --dynamic_loss_scale                                   #train a model with fp16
+python3 pretrain.py --fp16 --dynamic-loss-scale                                   #train a model with fp16
 python3 -m multiproc pretrain.py                                                  #distributed model training
-python3 pretrain.py --data ./data/amazon/reviews.json --lazy --loose_json \       #train a model on amazon data
-  --text_key reviewText --label_key overall --num_shards 1002 \
-  --optim Adam --split 1000,1,1 
+python3 pretrain.py --data ./data/amazon/reviews.json --lazy --loose-json \       #train a model on amazon data
+  --text-key reviewText --label-key overall --optim Adam --split 1000,1,1 
 python3 pretrain.py --tokenizer-type SentencePieceTokenizer --vocab-size 32000 \  #train a model with our sentencepiece tokenization
   --tokenizer-type bpe --tokenizer-path tokenizer.model 
 python3 pretrain.py --tokenizer-type SentencePieceTokenizer --vocab-size 32000 \  #train a transformer model with our sentencepiece tokenization
@@ -127,7 +128,7 @@ bash ./experiments/train_transformer_singlenode.sh                              
 
 For more documentation of our language modeling functionality look [here](./script_docs/modeling.md)
 
-In order to appropriately set the learning rate for a given batch size see the [training reproduction](./analysis/reproduction.md#training-set-up) section in analysis.
+In order to learn about our language modeling experiments and reproduce reulst see the [training reproduction](./analysis/reproduction.md#training-set-up) section in analysis.
 
 For information about how we achieve numerical stability with FP16 training see our [fp16 training](./analysis/reproduction.md#fp16-training) analysis.
 
@@ -165,8 +166,11 @@ python3 finetune_classifier.py --tokenizer-type SentencePieceTokenizer --vocab-s
   --decoder-learned-pos --decoder-attention-heads 8 --load <model>.pt --use-final-embed
 python3 finetune_classifier.py --automatic-thresholding --non-binary-cols l1 l2 l3 --lr 2e-5\     #finetune multilayer classifier with 3 classes and 4 heads per class on some custom dataset and automatically select classfication thresholds
   --classifier-hidden-layers 2048 1024 3 --heads-per-class 4 --aux-head-variance-loss-weight 1.   #`aux-head-variance-loss-weight` is an auxiliary loss to increase the variance between each of the 4 head's weights
-  --data <custom_train>.csv --val <custom_val>.csv --test <custom_test>.csv --load <model>.pt                                                                
+  --data <custom_train>.csv --val <custom_val>.csv --test <custom_test>.csv --load <model>.pt
+bash ./experiments/se_transformer_multihead.sh                                                    #finetune a multihead transformer on 8 semeval categories                                                                
 ```
+
+See how to reproduce our finetuning experiments in the [finetuning reproduction](./analysis/reproduction.md#finetuning-classifiers) section of analysis.
 
 Additional documentation of the command line arguments available for `finetune_classifier.py` can be found [here](./script_docs/finetune.md)
 
@@ -177,10 +181,12 @@ Additional documentation of the command line arguments available for `finetune_c
    * [Model/Optimization Robustness](./analysis/unsupervised.md#modeloptimization-robustness)
  * [Reproducing Results](./analysis/reproduction.md)
    * [Training](./analysis/reproduction.md#training)
-     * [Training Setup](./analysis/reproduction.md#training-set-up)
+     * [mLSTM Training Setup](./analysis/reproduction.md#mlstm-training-set-up)
+     * [Transformer Training Setup](./analysis/reproduction.md#transformer-training-set-up)
    * [FP16 Training](./analysis/reproduction.md#fp16-training) 
-   * [8K Model Training](./analysis/reproduction.md#going-bigger-with-large-models)
+   * [Large Model Training](./analysis/reproduction.md#going-bigger-with-large-models)
    * [Transfer](./analysis/reproduction.md#transfer)
+   * [Finetuning Classifiers](./analysis/reproduction.md#finetuning-classifiers)
  * [Data Parallel Scalability](./analysis/scale.md)
    * [PyTorch + GIL](./analysis/scale.md#pytorch-gil)
  * [Open Questions](./analysis/questions.md)
