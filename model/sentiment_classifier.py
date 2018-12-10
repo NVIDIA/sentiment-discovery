@@ -273,13 +273,13 @@ class SentimentClassifier(nn.Module):
         super().__init__()
         self.model_type = model_type
         if model_type == 'transformer':
-            self.encoder = TransformerFeaturizer(get_lm_out, args)
+            self.lm_encoder = TransformerFeaturizer(get_lm_out, args)
             out_size = args.decoder_embed_dim
         else:
             # NOTE: Dropout is for Classifier. Add separate RNN dropout or via params, if needed.
-            self.encoder = RNNFeaturizer(model_type, ntoken, ninp, nhid, nlayers, dropout=0.0, all_layers=all_layers,
+            self.lm_encoder = RNNFeaturizer(model_type, ntoken, ninp, nhid, nlayers, dropout=0.0, all_layers=all_layers,
                                          concat_pools=concat_pools, get_lm_out=get_lm_out, hidden_warmup=args.num_hidden_warmup > 0)
-            out_size = self.encoder.output_size
+            out_size = self.lm_encoder.output_size
         self.encoder_dim = out_size
 
         if classifier_hidden_layers is None:
@@ -295,18 +295,18 @@ class SentimentClassifier(nn.Module):
         self.heads_per_class = args.heads_per_class
 
     def cuda(self, device=None):
-        self.encoder.cuda(device)
+        self.lm_encoder.cuda(device)
         self.classifier.cuda(device)
         return self
 
     def cpu(self):
-        self.encoder.cpu()
+        self.lm_encoder.cpu()
         self.classifier.cpu()
         return self
 
 
     def forward(self, input, seq_len=None, get_hidden=False):
-        hidden, lm_out = self.encoder(input, seq_len, get_hidden)
+        hidden, lm_out = self.lm_encoder(input, seq_len, get_hidden)
         if get_hidden:
             hidden = hidden[0]
         if self.neurons is not None:
@@ -318,12 +318,12 @@ class SentimentClassifier(nn.Module):
 
     def state_dict(self, destination=None, prefix='', keep_vars=False):
         sd = {}
-        sd['encoder'] = self.encoder.state_dict(destination=destination, prefix=prefix, keep_vars=keep_vars)
+        sd['lm_encoder'] = self.lm_encoder.state_dict(destination=destination, prefix=prefix, keep_vars=keep_vars)
         sd['classifier'] = self.classifier.state_dict(destination=destination, prefix=prefix, keep_vars=keep_vars)
         return sd
 
     def load_state_dict(self, state_dict, strict=True):
-        self.encoder.load_state_dict(state_dict['encoder'], strict=strict)
+        self.lm_encoder.load_state_dict(state_dict['lm_encoder'], strict=strict)
         self.classifier.load_state_dict(state_dict['classifier'], strict=strict)
         self.neurons = self.classifier.neurons
         self.thresholds = self.classifier.thresholds

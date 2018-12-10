@@ -50,7 +50,7 @@ def make_loaders(opt):
         'ds_type': opt.data_set_type, 'split': split, 'loose': opt.loose_json,
         'tokenizer_type': opt.tokenizer_type, 'tokenizer_model_path': opt.tokenizer_path,
         'vocab_size': opt.vocab_size, 'model_type': opt.tokenizer_model_type,
-        'non_binary_cols': opt.non_binary_cols}
+        'non_binary_cols': opt.non_binary_cols, 'process_fn': opt.process_fn}
 
     eval_loader_args = copy.copy(data_loader_args)
     eval_set_args = copy.copy(data_set_args)
@@ -127,6 +127,8 @@ def configure_data(parser):
                         help="""Filename for validation""")
     parser.add_argument('--test', nargs='*', default=None,
                         help="""Filename for testing""")
+    parser.add_argument('--process-fn', type=str, default='process_str', choices=['process_str', 'process_tweet'],
+                        help='what preprocessing function to use to process text. One of [process_str, process_tweet].')
     parser.add_argument('--batch-size', type=int, default=128,
                         help='Data Loader batch size')
     parser.add_argument('--eval-batch-size', type=int, default=0,

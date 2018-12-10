@@ -19,7 +19,7 @@ from model import DistributedDataParallel as DDP
 
 from apex.reparameterization import apply_weight_norm, remove_weight_norm
 from configure_data import configure_data
-from learning_rates import LinearLR, CosineAnnealingLR, WarmupLR, SlantedTriangularLR
+from learning_rates import AnnealingLR, WarmupLR, SlantedTriangularLR
 from arguments import add_general_args, add_model_args, add_unsupervised_data_args
 
 rnn_model = None
@@ -95,12 +95,10 @@ def setup_model_and_optim(args, train_data, tokenizer):
 
         warmup_iter = args.warmup * num_iters
 
-        if args.linear_decay:
-            LR = LinearLR(optim, num_iters, last_iter=init_step)
-        elif args.stlr_cut_frac is None:
-            LR = CosineAnnealingLR(optim, start_lr=args.lr, warmup_iter=warmup_iter, num_iters=num_iters)
-        else:
+        if args.stlr_cut_frac is not None:
             LR = SlantedTriangularLR(optim, cut_frac=args.stlr_cut_frac, num_iters=num_iters)
+        else:
+            LR = AnnealingLR(optim, start_lr=args.lr, warmup_iter=warmup_iter, num_iters=num_iters, decay_style=args.decay_style)
 
         if args.warmup != 0:
             LR_Warmer = WarmupLR(optim, warmup_iter, last_iter=init_step)
@@ -296,7 +294,7 @@ def main():
     torch.backends.cudnn.enabled = False
     args.cuda = torch.cuda.is_available()
 
-    if args.multinode_init:
+    if args.multinode_init or args.world_size <= 1:
         args.rank = int(os.getenv('RANK', 0))
         args.world_size = int(os.getenv("WORLD_SIZE", 1))
 

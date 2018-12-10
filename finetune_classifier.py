@@ -76,6 +76,8 @@ def get_model_and_optim(args, train_data):
                 sd = sd['sd']
 
         if not args.load_finetuned:
+            if 'lm_encoder' in sd:
+                sd = sd['lm_encoder']
             try:
                 model.encoder.load_state_dict(sd)
             except:
@@ -705,7 +707,7 @@ def main():
                                     update_info_dict(info_dicts[j], T_pred[:,j], T_label[:,j], std=T_std[:,j])
                                 total_metrics, metric_strings = get_metric_report(info_dicts, args, keys)
                                 test_str = ''
-                                test_str_base = "Test  {:5s} (All): {:5.2f}, Test  Class {:5s}: {}"
+                                test_str_base = "Test  {:5s} (micro): {:5.2f}, Test  Class {:5s}: {}"
                                 for idx, m in enumerate(report_metrics):
                                     data_str = test_str_base.format(m, total_metrics[idx] * 100, m, metric_strings[idx])
                                     test_str += data_str + " " * max(0, 110 - len(data_str)) + "\n"

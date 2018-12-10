@@ -3,7 +3,7 @@ import math
 
 from .samplers import BatchSampler, DistributedBatchSampler, TransposedSampler, RandomShardSampler, BatchShardSampler, DistributedBatchShardSampler
 from .loaders import DataLoader, ShardLoader
-from .preprocess import tokenize_str_batch, binarize_labels, process_str
+from .preprocess import tokenize_str_batch, binarize_labels, process_str, process_tweet, batch_tokens
 from .datasets import json_dataset, csv_dataset, split_ds, get_processed_path, ConcatDataset, SplitDataset, data_shard
 from .lazy_loader import exists_lazy, make_lazy, lazy_array_loader
 from .tokenization import Tokenization, CommandToken, Tokenizer, CharacterLevelTokenizer, make_tokenizer
@@ -33,6 +33,8 @@ def make_dataset(path, seq_length, text_key, label_key, lazy=False, process_fn=p
                 delim=',', loose=False, binarize_sent=False, drop_unlabeled=False, tokenizer=None,
                 tokenizer_type='CharacterLevelTokenizer', tokenizer_model_path=None, vocab_size=None,
                 model_type='bpe', pad_token=0, character_converage=1.0, non_binary_cols=None, **kwargs):
+    if isinstance(process_fn, str):
+        process_fn = eval(process_fn)
     if non_binary_cols is not None:
         label_key = non_binary_cols
     def get_dataset_from_path(path_):

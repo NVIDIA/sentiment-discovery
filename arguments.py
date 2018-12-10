@@ -68,8 +68,8 @@ def add_unsupervised_data_args(parser):
                              help="""number of iterations per epoch to run training for""")
     group.add_argument('--eval-iters', type=int, default=100,
                              help="""number of iterations per epoch to run validation/test for""")
-    group.add_argument('--linear-decay', action='store_true',
-                             help='set learning rate to decay linearly')
+    group.add_argument('--decay-style', type=str, default=None, choices=['constant', 'linear', 'cosine', 'exponential'],
+                        help='one of constant(None), linear, cosine, or exponential')
     group.add_argument('--stlr-cut-frac', type=float, default=None,
                              help='what proportion of iterations to peak the slanted triangular learning rate')
     group.add_argument('--warmup', type=float, default=0,
@@ -275,7 +275,8 @@ def add_finetune_classifier_args(parser):
                        help='space to version model name -- for saving')
     group.add_argument('--automatic-thresholding', action='store_true')
     group.add_argument('--report-no-thresholding', action='store_true')
-    group.add_argument('--decay-style', type=str, default=None, help='one of constant(None), linear, cosine, or exponential')
+    group.add_argument('--decay-style', type=str, default=None, choices=['constant', 'linear', 'cosine', 'exponential'],
+                        help='one of constant(None), linear, cosine, or exponential')
     group.add_argument('--warmup-epochs', type=float, default=0.)
     group.add_argument('--decay-epochs', type=float, default=-1, help='number of epochs to decay for. if -1 decays for all of training')
     group.add_argument('--load-finetuned', action='store_true')

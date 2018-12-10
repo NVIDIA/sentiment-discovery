@@ -15,12 +15,14 @@ if __name__ == '__main__':
     env['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
 
     base_command = "python3 finetune_classifier.py --warmup-epochs 0.5 --epochs 20 " \
-        + "--optim Adam --all-metrics --threshold-metric acc --automatic-thresholding --batch-size 16 " \
+        + "--optim Adam --all-metrics --threshold-metric f1 --automatic-thresholding --batch-size 16 " \
         + "--aux-lm-loss --aux-lm-loss-weight 0.02 --classifier-hidden-layers 1 --classifier-dropout 0.3 " 
+        # + "--optim Adam --all-metrics --threshold-metric acc --automatic-thresholding --batch-size 16 " \
 
     transformer_options = "--lr 1e-5 --tokenizer-type SentencePieceTokenizer --tokenizer-path imdb_sst_ama_32k_tokenizer.model --vocab-size 32000 --decoder-layers 12 "\
-        +" --decoder-embed-dim 768 --decoder-ffn-embed-dim 3072 --decoder-learned-pos --model transformer --load new_transformer_8/e80000.pt --use-final-embed --max-seq-len 150 " \
+        +" --decoder-embed-dim 768 --decoder-ffn-embed-dim 3072 --decoder-learned-pos --model transformer --load new_transformer_8_64/e60000.pt --use-final-embed --max-seq-len 150 " \
         +"  --dropout 0.2 --attention-dropout 0.2 --relu-dropout 0.2" 
+        # +" --decoder-embed-dim 768 --decoder-ffn-embed-dim 3072 --decoder-learned-pos --model transformer --load new_transformer_8/e80000.pt --use-final-embed --max-seq-len 150 " \
 
     mlstm_options = " --lr 1e-5 --load new_mlstm.pt"
 
