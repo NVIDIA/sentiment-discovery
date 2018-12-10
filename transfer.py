@@ -66,8 +66,8 @@ def get_model(args):
             sd = x = torch.load(f)
             if 'sd' in sd:
                 sd = sd['sd']
-            if 'encoder' in sd:
-                sd = sd['encoder']
+            if 'lm_encoder' in sd:
+                sd = sd['lm_encoder']
 
         try:
             model.load_state_dict(sd)
@@ -109,7 +109,7 @@ def transform(model, text, args):
         if args.model.lower() == 'transformer' or args.model.lower() == 'bert':
             cell_out, lm_or_encoder_out = model(text_batch, length_batch, args.get_hidden)
         else:
-            model.encoder.rnn.reset_hidden(args.batch_size)
+            model.lm_encoder.rnn.reset_hidden(args.batch_size)
             for _ in range(1 + args.num_hidden_warmup):
                 cell_out, lm_or_encoder_out = model(text_batch, length_batch, args.get_hidden)
         return cell_out, lm_or_encoder_out

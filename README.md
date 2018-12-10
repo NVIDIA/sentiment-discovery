@@ -17,21 +17,22 @@ The model's performance as a whole will increase as it processes more data.
    * [Pretrained Models](#pretrained-models)
    * [Data Downloads](#data-downloads)
  * [Usage](#usage)
-   * [Classifying Text](#classifying-text)
-     * [Classification Documentation](./script_docs/classifier.md)
-   * [Training Language Models (+ Distributed/FP16 Training)](#training-language-models-distributed-fp16-training)
-     * [Modeling Documentation](./script_docs/modeling.md)
-     * [Training HyperParameter Documentation](./analysis/reproduction.md#training-set-up)
-     * [FP16 Training Information](./analysis/reproduction.md#fp16-training)
-   * [Sentiment Transfer](#sentiment-transfer)
-     * [Transfer Documentation](./script_docs/transfer.md)
-   * [Classifier Finetuning](#classifier-finetuning)
-     * [Finetuning Documentation](./script_docs/finetune.md)
+    * [Classifying Text](#classifying-text)
+      * [Classification Documentation](./script_docs/arguments.md#running-a-classifier-arguments)
+    * [Training Language Models (+ Distributed/FP16 Training)](#training-language-models-distributed-fp16-training)
+      * [Modeling Documentation](./script_docs/arguments.md#unsupervised-lm-arguments)
+      * [Training HyperParameter Documentation](./analysis/reproduction.md#training-set-up)
+      * [FP16 Training Information](./analysis/reproduction.md#fp16-training)
+    * [Sentiment Transfer](#sentiment-transfer)
+      * [Transfer Documentation](./script_docs/arguments.md#sentiment-transfer-arguments)
+    * [Classifier Finetuning](#classifier-finetuning)
+      * [Finetuning Documentation](./script_docs/arguments.md#finetuning-a-classifier-arguments)
+    * [All Argument Documentation](./script_docs/arguments.md)
  * [Analysis](#analysis)
     * [Why Unsupervised Language Modeling?](./analysis/unsupervised.md)
-     * [Difficulties of Supervised Natural Language](./analysis/unsupervised.md#difficulties-of-supervised-natural-language)
-     * [Data Robustness](./analysis/unsupervised.md#data-robustness)
-     * [Model/Optimization Robustness](./analysis/unsupervised.md#modeloptimization-robustness)
+      * [Difficulties of Supervised Natural Language](./analysis/unsupervised.md#difficulties-of-supervised-natural-language)
+      * [Data Robustness](./analysis/unsupervised.md#data-robustness)
+      * [Model/Optimization Robustness](./analysis/unsupervised.md#modeloptimization-robustness)
   * [Reproducing Results](./analysis/reproduction.md)
      * [Training](./analysis/reproduction.md#training)
         * [mLSTM Training Setup](./analysis/reproduction.md#mlstm-training-set-up)
@@ -102,7 +103,7 @@ python3 run_classifier.py --load_model ama_sst_16.pt --fp16                     
 python3 run_classifier.py --load_model ama_sst.pt --text-key <text-column> --data <path.csv>     # classify your own dataset
 ```
 
-See [here](./script_docs/classifier.md) for more documentation.
+See [here](./script_docs/arguments.md#running-a-classifier-arguments) for more documentation.
 
 ### Training Language Models (+ Distributed/FP16 Training)
 Train a recurrent language model on a csv/json corpus. By default we train a weight-normalized, 4096-d mLSTM, with a 64-d character embedding.
@@ -126,7 +127,7 @@ bash ./experiments/train_mlstm_singlenode.sh                                    
 bash ./experiments/train_transformer_singlenode.sh                                #run our transformer training script on 1 DGX-1V 
 ```
 
-For more documentation of our language modeling functionality look [here](./script_docs/modeling.md)
+For more documentation of our language modeling functionality look [here](./script_docs/arguments.md#unsupervised-lm-arguments)
 
 In order to learn about our language modeling experiments and reproduce reulst see the [training reproduction](./analysis/reproduction.md#training-set-up) section in analysis.
 
@@ -148,7 +149,7 @@ Expected test accuracy for transfering fully trained mLSTM models to sentiment c
 
 ![Sentiment Transfer Performance](./figures/sentiment_performance.png)
 
-Additional documentation of the command line arguments available for transfer can be found [here](./script_docs/transfer.md)
+Additional documentation of the command line arguments available for transfer can be found [here](./script_docs/arguments.md#sentiment-transfer-arguments)
  
 ### Classifier Finetuning
 Given a trained language model and classification dataset, this script will build a classifier that leverages the trained language model as a text feature encoder.
@@ -172,7 +173,7 @@ bash ./experiments/se_transformer_multihead.sh                                  
 
 See how to reproduce our finetuning experiments in the [finetuning reproduction](./analysis/reproduction.md#finetuning-classifiers) section of analysis.
 
-Additional documentation of the command line arguments available for `finetune_classifier.py` can be found [here](./script_docs/finetune.md)
+Additional documentation of the command line arguments available for `finetune_classifier.py` can be found [here](./script_docs/arguments.md#finetuning-a-classifier-arguments)
 
 ## [Analysis](./analysis/)
  * [Why Unsupervised Language Modeling?](./analysis/unsupervised.md)

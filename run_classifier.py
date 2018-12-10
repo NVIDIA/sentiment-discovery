@@ -82,11 +82,11 @@ def get_model(args):
             model.load_state_dict(sd)
         except:
             # if state dict has weight normalized parameters apply and remove weight norm to model while loading sd
-            if hasattr(model.encoder, 'rnn'):
-                apply_weight_norm(model.encoder.rnn)
+            if hasattr(model.lm_encoder, 'rnn'):
+                apply_weight_norm(model.lm_encoder.rnn)
             else:
-                apply_weight_norm(model.encoder)
-            model.encoder.load_state_dict(sd)
+                apply_weight_norm(model.lm_encoder)
+            model.lm_encoder.load_state_dict(sd)
             remove_weight_norm(model)
 
     if args.neurons > 0:
@@ -97,7 +97,7 @@ def get_model(args):
 # uses similar function as transform from transfer.py
 def classify(model, text, args):
     # Make sure to set *both* parts of the model to .eval() mode. 
-    model.encoder.eval()
+    model.lm_encoder.eval()
     model.classifier.eval()
     # Initialize data, append results
     stds = np.array([])
@@ -124,7 +124,7 @@ def classify(model, text, args):
         if args.model.lower() == 'transformer' or args.model.lower() == 'bert':
             class_out, (lm_or_encoder_out, state) = model(text_batch, length_batch, args.get_hidden)
         else:
-            model.encoder.rnn.reset_hidden(args.batch_size)
+            model.lm_encoder.rnn.reset_hidden(args.batch_size)
             for _ in range(1 + args.num_hidden_warmup):
                 class_out, (lm_or_encoder_out, state) = model(text_batch, length_batch, args.get_hidden)
         if args.use_softmax and args.heads_per_class == 1:

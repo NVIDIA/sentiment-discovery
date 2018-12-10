@@ -79,14 +79,14 @@ def get_model_and_optim(args, train_data):
             if 'lm_encoder' in sd:
                 sd = sd['lm_encoder']
             try:
-                model.encoder.load_state_dict(sd)
+                model.lm_encoder.load_state_dict(sd)
             except:
                 # if state dict has weight normalized parameters apply and remove weight norm to model while loading sd
-                if hasattr(model.encoder, 'rnn'):
-                    apply_weight_norm(model.encoder.rnn)
+                if hasattr(model.lm_encoder, 'rnn'):
+                    apply_weight_norm(model.lm_encoder.rnn)
                 else:
-                    apply_weight_norm(model.encoder)
-                model.encoder.load_state_dict(sd)
+                    apply_weight_norm(model.lm_encoder)
+                model.lm_encoder.load_state_dict(sd)
                 remove_weight_norm(model)
         else:
             model.load_state_dict(sd)
@@ -161,7 +161,7 @@ def transform(model, text_batch, labels_batch, length_batch, args, LR=None):
         if args.model.lower() == 'transformer' or args.model.lower() == 'bert':
             class_out, (lm_or_encoder_out, state) = model(text_batch, length_batch, args.get_hidden)
         else:
-            model.encoder.rnn.reset_hidden(args.batch_size)
+            model.lm_encoder.rnn.reset_hidden(args.batch_size)
             for _ in range(1 + args.num_hidden_warmup):
                 class_out, (lm_or_encoder_out, state) = model(text_batch, length_batch, args.get_hidden)
         # if args.heads_per_class > 1:
@@ -319,17 +319,17 @@ def finetune(model, text, args, val_data=None, LR=None, reg_loss=None, tqdm_desc
     '''
     # NOTE: If in training mode, do not run in .eval() mode. Bug fixed.
     if LR is None:
-        model.encoder.eval()
+        model.lm_encoder.eval()
         model.classifier.eval()
     else:
         # Very important to reset back to train mode for future epochs!
-        model.encoder.train()
+        model.lm_encoder.train()
         model.classifier.train()
 
     # Optionally, freeze language model (train MLP only)
     # NOTE: un-freeze gradients if they every need to be tweaked in future iterations
     if args.freeze_lm:
-        for param in model.encoder.parameters():
+        for param in model.lm_encoder.parameters():
             param.requires_grad = False
 
     # Choose which losses to implement
@@ -567,7 +567,7 @@ def main():
             loss += torch.abs(p).sum()*reg_penalty
         return loss
     reg_loss = clf_reg_loss
-    init_params = list(model.encoder.parameters())
+    init_params = list(model.lm_encoder.parameters())
 
     if args.use_logreg:
         def transform_for_logreg(model, data, args, desc='train'):
@@ -638,12 +638,12 @@ def main():
                     tqdm.write('performing test eval')
                     try:
                         with torch.no_grad():
-                            if args.automatic_thresholding or args.report_no_thresholding:
+                            if not args.no_test_eval:
                                 auto_thresholds = None
                                 dual_thresholds = None
                                 # NOTE -- we manually threshold to F1 [not necessarily good]
                                 V_pred, V_label, V_std = generate_outputs(model, val_data, args)
-                                if not args.report_no_thresholding:
+                                if args.automatic_thresholding:
                                     if args.dual_thresh:
                                         # get dual threshold (do not call auto thresholds)
                                         # TODO: Handle multiple heads per class
@@ -742,11 +742,10 @@ def main():
                 tqdm.write('Saving commandline to %s' % args_save_path)
                 with open(args_save_path, 'w') as f:
                     f.write(' '.join(sys.argv[1:]))
-                # Also save thresholds
-                thresh_save_path = os.path.join(save_root, 'thresh'+'_ep'+str(e)+'.npy')
-                tqdm.write('Saving thresh to %s' % thresh_save_path)
-                # add thresholds to arguments for easy reloading of model config
-                if not args.report_no_thresholding:
+                # Save and add thresholds to arguments for easy reloading of model config
+                if not args.no_test_eval and args.automatic_thresholding:
+                    thresh_save_path = os.path.join(save_root, 'thresh'+'_ep'+str(e)+'.npy')
+                    tqdm.write('Saving thresh to %s' % thresh_save_path)
                     if args.dual_thresh:
                         np.save(thresh_save_path, list(zip(keys, dual_thresholds)))
                         args.thresholds = list(zip(keys, dual_thresholds))
