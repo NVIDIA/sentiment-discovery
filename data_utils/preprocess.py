@@ -9,7 +9,7 @@ import torch
 try:
     import emoji
 except:
-    raise Warning("emoji import unavailable")
+    print(Warning("emoji import unavailable"))
 
 
 HTML_CLEANER_REGEX = re.compile('<.*?>')

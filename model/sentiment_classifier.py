@@ -276,8 +276,8 @@ class SentimentClassifier(nn.Module):
             self.lm_encoder = TransformerFeaturizer(get_lm_out, args)
             out_size = args.decoder_embed_dim
         elif model_type.lower() == 'elmo':
-            self.encoder = ElmoFeaturizer(args)
-            out_size = self.encoder.out_size
+            self.lm_encoder = ElmoFeaturizer(args)
+            out_size = self.lm_encoder.out_size
         else:
             # NOTE: Dropout is for Classifier. Add separate RNN dropout or via params, if needed.
             self.lm_encoder = RNNFeaturizer(model_type, ntoken, ninp, nhid, nlayers, dropout=0.0, all_layers=all_layers,
