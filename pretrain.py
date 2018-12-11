@@ -30,8 +30,6 @@ def setup_model_and_optim(args, train_data, tokenizer):
         embed_tokens = m.Embedding(ntokens, args.decoder_embed_dim, padding_idx=tokenizer.command_name_map['pad'].Id)
         model = m.TransformerModel(m.DecoderPreprocessor(args, embed_tokens),
                                     m.TransformerDecoder(args, embed_tokens))
-    elif args.model.lower() == 'bert':
-        model = m.BERTModel(args)
     else:
         model = m.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.tied)
         global rnn_model

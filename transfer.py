@@ -109,7 +109,7 @@ def transform(model, text, args):
         return text.t(), labels, timesteps-1
 
     def get_outs(text_batch, length_batch):
-        if args.model.lower() == 'transformer' or args.model.lower() == 'bert':
+        if args.model.lower() == 'transformer':
             cell_out, lm_or_encoder_out = model(text_batch, length_batch, args.get_hidden)
         else:
             model.rnn.reset_hidden(args.batch_size)

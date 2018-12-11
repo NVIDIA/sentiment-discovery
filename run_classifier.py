@@ -121,7 +121,7 @@ def classify(model, text, args):
         return text.t(), labels, timesteps-1
 
     def get_outs(text_batch, length_batch):
-        if args.model.lower() == 'transformer' or args.model.lower() == 'bert':
+        if args.model.lower() == 'transformer':
             class_out, (lm_or_encoder_out, state) = model(text_batch, length_batch, args.get_hidden)
         else:
             model.lm_encoder.rnn.reset_hidden(args.batch_size)

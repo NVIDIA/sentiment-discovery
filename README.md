@@ -150,6 +150,8 @@ By default only one neuron is used for this second regression.
 python3 transfer.py --load mlstm.pt                                 #performs transfer to SST, saves results to `<model>_transfer/` directory
 python3 transfer.py --load mlstm.pt --neurons 5                     #use 5 neurons for the second regression
 python3 transfer.py --load mlstm.pt --fp16                          #run model in fp16 for featurization step
+bash ./experiments/run_sk_sst.sh                                    #run transfer learning with mlstm on imdb dataset
+bash ./experiments/run_sk_imdb.sh                                   #run transfer learning with mlstm on sst dataset
 ```
 
 Expected test accuracy for transfering fully trained mLSTM models to sentiment classification for a given mLSTM hidden size:

@@ -77,6 +77,12 @@ These features are used for training a logistic regression model (via sklearn/Py
 
 The feature with the largest L1 penalty is then treated as a "sentiment neuron" to classify the samples and analyze difference in performance.
 
+To run this type of transfer learning use:
+```
+bash ./experiments/run_sk_sst.sh                                    #run transfer learning with mlstm on imdb dataset
+bash ./experiments/run_sk_imdb.sh                                   #run transfer learning with mlstm on sst dataset
+```
+
 **It should be noted that SOTA performance uses [Gray et. al's](https://blog.openai.com/block-sparse-gpu-kernels/) follow up work for comparison**
 
 ![SOTA Sentiment Performance](../figures/sentiment_performance.png)
