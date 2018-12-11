@@ -4,8 +4,7 @@ import torch.nn.functional as F
 
 from .RNNBackend import RNNCell
 
-# from torch.nn._functions.thnn import rnnFusedPointwise as fusedBackend
-_VF = torch._C._VariableFunctions
+from torch.nn._functions.thnn import rnnFusedPointwise as fusedBackend
 
 import math 
 
@@ -60,10 +59,12 @@ def mLSTMCell(input, hidden, w_ih, w_hh, w_mih, w_mhh, b_ih=None, b_hh=None):
 
     # TODO: look into fusedLSTM not getting proper results.
     if input.is_cuda:
+        igates = F.linear(input, w_ih)
         m = F.linear(input, w_mih) * F.linear(hidden[0], w_mhh)
+        hgates = F.linear(m, w_hh)
 
-        state = _VF.lstm_cell
-        return state(input, (m, hidden[1]), w_ih, w_hh, b_ih, b_hh)
+        state = fusedBackend.LSTMFused.apply
+        return state(igates, hgates, hidden[1], b_ih, b_hh)
 
     hx, cx = hidden
     
