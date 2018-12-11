@@ -88,7 +88,7 @@ We did not include pretrained models leveraging ELMo. To reproduce our papers' r
 Each file has a dictionary containing a PyTorch `state_dict` consisting of a language model (lm_encoder keys) trained on Amazon reviews and a classifier (classifier key) as well as accompanying `args` necessary to run a model with that `state_dict`. 
 
 ### Data Downloads
-We've provided the Binary Stanford Sentiment Treebank (Binary SST) and IMDB Movie Review datasets as part of this repository. In order to train on the amazon dataset please download the "aggressively deduplicated data" version from Julian McAuley's original [site](http://jmcauley.ucsd.edu/data/amazon/). Access requests to the dataset should be approved instantly. While using the dataset make sure to load it with the `--loose-json` flag.
+In the `./data` folder we've provided processed copies of [the Binary Stanford Sentiment Treebank (Binary SST)](https://nlp.stanford.edu/sentiment/index.html), [IMDB Movie Review](http://ai.stanford.edu/~amaas/data/sentiment/), and the [SemEval2018 Tweet Emotion](https://competitions.codalab.org/competitions/17751) datasets as part of this repository. In order to train on the amazon dataset please download the "aggressively deduplicated data" version from Julian McAuley's original [site](http://jmcauley.ucsd.edu/data/amazon/). Access requests to the dataset should be approved instantly. While using the dataset make sure to load it with the `--loose-json` flag.
 
 ## Usage
 In addition to providing easily reusable code of the core functionalities (models, distributed, fp16, etc.) of this work, we also provide scripts to perform the high-level functionalities of the original paper:
