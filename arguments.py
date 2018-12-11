@@ -88,7 +88,7 @@ def add_unsupervised_data_args(parser):
 
 def add_model_args(parser):
     args, _ = parser.parse_known_args()
-    if args.model.lower() == 'transformer' or args.model.lower() == 'bert':
+    if args.model.lower() == 'transformer':
         return add_transformer_args(parser)
     elif args.model.lower() == 'elmo':
         return add_elmo_args(parser)

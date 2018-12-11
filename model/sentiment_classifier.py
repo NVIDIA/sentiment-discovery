@@ -286,7 +286,7 @@ class SentimentClassifier(nn.Module):
         self.encoder_dim = out_size
 
         if classifier_hidden_layers is None:
-            self.classifier = BinaryClassifier(num_features=self.encoder_dim, double_threshold=args.double_threshold, dual_threshold=args.dual_threshold)
+            self.classifier = BinaryClassifier(num_features=self.encoder_dim, double_threshold=args.double_thresh, dual_threshold=args.dual_thresh)
         else:
             self.classifier = MultiLayerBinaryClassifier(self.encoder_dim, classifier_hidden_layers, dropout=dropout, heads_per_class=args.heads_per_class,
                                                          softmax=args.use_softmax, double_threshold=args.double_thresh, dual_threshold=args.dual_thresh and not args.joint_binary_train)

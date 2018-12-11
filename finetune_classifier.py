@@ -30,7 +30,7 @@ from configure_data import configure_data
 from learning_rates import AnnealingLR, SlantedTriangularLR, ConstantLR
 from arguments import add_general_args, add_model_args, add_classifier_model_args, add_finetune_classifier_args
 from metric_utils import update_info_dict, get_metric
-from analysis import _binary_threshold, _neutral_threshold_two_output
+from threshold import _binary_threshold, _neutral_threshold_two_output
 from data_utils import make_elmo_batch
 
 def get_data_and_args():
@@ -166,7 +166,7 @@ def transform(model, text_batch, labels_batch, length_batch, args, LR=None):
     batch_size = text_batch.size(1)
 
     def get_outs():
-        if args.model.lower() == 'transformer' or args.model.lower() == 'bert' or args.model.lower() == 'elmo':
+        if args.model.lower() == 'transformer' or args.model.lower() == 'elmo':
             class_out, (lm_or_encoder_out, state) = model(text_batch, length_batch, args.get_hidden)
         else:
             model.lm_encoder.rnn.reset_hidden(args.batch_size)

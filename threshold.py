@@ -186,34 +186,12 @@ def _neutral_threshold_two_output(preds, labels, threshold_granularity=30):
 
     return best_acc, (best_0, best_1)
 
-
-def consolidate_google_results(args):
-    stem_list = [
-        'p/4k-nikolai-bin',
-        'p/5k1-nikolai-bin',
-        'p/5k2-nikolai-bin'
-    ]
-    csv_df = pd.concat([pd.read_csv(s + '.csv') for s in stem_list], axis=0).reset_index(drop=True)
-    print(csv_df.shape)
-    npys = pd.DataFrame(np.concatenate([np.load(s + '.npy') for s in stem_list], axis=1).transpose(), columns=['google_labels', 'google_scores'])
-    print(npys.shape)
-    all_df = pd.concat([csv_df, npys], axis=1)
-    all_df['google_scores'] = (all_df['google_scores'].astype(float) + 1) / 2
-    print(all_df.isnull().sum())
-    all_df = all_df.sample(frac=1)
-    size = all_df.shape[0]
-    train, thresh, val = all_df.iloc[:int(size * 0.7)], all_df.iloc[int(size * 0.7):int(size * 0.8)], all_df.iloc[int(size * 0.8):]
-    for s in ['train', 'thresh', 'val']:
-        print(eval(s).isnull().sum(), eval(s).shape)
-        eval(s).to_csv('p/all-nvidia-bin-{}.csv'.format(s), index=False)
-
 def main():
     task_dict = {
         'auc' : get_auc,
         'binary' : binary_threshold,
         'neutral' : neutral_threshold_two_output,
         'scalar' : neutral_threshold_scalar_output,
-        'google' : consolidate_google_results
     }
     parser = argparse.ArgumentParser("Tools for optimizing outputs through ROC/AUC analysis")
     parser.add_argument('--task', type=str, required=True, help='what do you want to do?')

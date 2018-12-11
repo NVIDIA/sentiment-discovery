@@ -10,8 +10,6 @@ from allennlp.modules.elmo import Elmo
 from apex import RNN
 from .transformer_utils import Embedding
 from .transformer import TransformerDecoder
-from .modeling import BertForPreTraining as BERTEncoder
-from .modeling import BertConfig
 
 class RNNModel(nn.Module):
     """Container module with an encoder, a recurrent module, and a decoder."""
@@ -307,15 +305,6 @@ class TransformerFeaturizer(nn.Module):
 
     def load_state_dict(self, state_dict, strict=True):
         return self.encoder.load_state_dict(state_dict, strict=strict)
-
-class BERTModel(nn.Module):
-    def __init__(self, args):
-        super(BERTModel, self).__init__()
-        self.config = BertConfig(args.data_size, hidden_size=args.decoder_embed_dim, num_hidden_layers=args.decoder_layers, num_attention_heads=args.decoder_attention_heads, intermediate_size=args.decoder_ffn_embed_dim, hidden_dropout_prob=args.relu_dropout, attention_probs_dropout_prob=args.attention_dropout)
-        self.encoder = BERTEncoder(self.config)
-
-    def forward(self, input_tokens, chkpt_grad=False, **kwargs):
-        return self.encoder(input_tokens.t(), chkpt_grad=chkpt_grad)
 
 class ElmoFeaturizer(nn.Module):
     def __init__(self, args):
