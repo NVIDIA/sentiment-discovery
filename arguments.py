@@ -236,6 +236,8 @@ def add_finetune_classifier_args(parser):
     group = parser.add_argument_group('finetune_classifier', 'arguments used for finetune script')
     group.add_argument('--use-logreg', action='store_true',
                         help='use scikitlearn logistic regression instead of finetuning whole classifier')
+    group.add_argument('--no-test-eval', action='store_true',
+                        help='whether to not evaluate the test model (useful when your test set has no labels)')
     group.add_argument('--stlr-cut-frac', type=float, default=None,
                         help='what proportion of iterations to peak the slanted triangular learning rate')
     group.add_argument('--cos-cut-frac', type=float, default=None,

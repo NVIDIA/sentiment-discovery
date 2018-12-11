@@ -605,8 +605,8 @@ def main():
                 text_batch, labels_batch, length_batch = get_supervised_batch(batch, args.cuda, model, args.ids, args, heads_per_class=args.heads_per_class)
                 # if args.non_binary_cols:
                 #     labels_batch = labels_batch[:,0]-labels_batch[:,1]+1
-                class_out, (encoder_out, _) = transform(model, text_batch, labels_batch, length_batch, args)
-                X_out.append(encoder_out.cpu().numpy())
+                _, (_, state) = transform(model, text_batch, labels_batch, length_batch, args)
+                X_out.append(state.cpu().numpy())
                 Y_out.append(labels_batch.cpu().numpy())
             X_out = np.concatenate(X_out)
             Y_out = np.concatenate(Y_out)
@@ -677,7 +677,7 @@ def main():
                                             args.threshold_metric, args.micro, global_tweaks=args.global_tweaks, heads_per_class=args.heads_per_class, class_single_threshold=args.class_single_threshold)
                                 T_pred, T_label, T_std = generate_outputs(model, test_data, args, auto_thresholds)
                                 if not args.use_softmax and model.out_dim / args.heads_per_class > 1:
-                                    keys = args.non_binary_cols
+                                    keys = list(args.non_binary_cols)
                                     if args.dual_threshold:
                                         if len(keys) == len(dual_thresholds):
                                             print('Dual thresholds: %s' % str(list(zip(keys, dual_thresholds))))

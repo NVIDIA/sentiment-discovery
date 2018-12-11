@@ -311,10 +311,12 @@ class ElmoFeaturizer(nn.Module):
         self.options_file = args.options_file
         self.weights_file = args.weights_file
         self.encoder = Elmo(self.options_file, self.weights_file, 2, dropout=0.0)
-        self.out_size = self.encoder.get_output_dim()
+        self.out_size = self.encoder.get_output_dim()#*2
 
     def forward(self, input, seq_len=None, get_hidden=False, chkpt_grad=False, **kwargs):
         embeddings = self.encoder(input)
+        # embeddings = torch.cat([embeddings['elmo_representations'][0],embeddings['elmo_representations'][0]], -1)
+        # embeddings = embeddings['elmo_representations'][0]
         embeddings = embeddings['elmo_representations'][-1]
         if seq_len is not None:
             feats = embeddings[torch.arange(seq_len.size(0)), seq_len.squeeze()]
