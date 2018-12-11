@@ -11,7 +11,7 @@ Contrary to results in the OpenAI work the validation reconstruction loss is low
 ### mLSTM Training Set Up
 It took several cycles of trial and error to come up with a result comparable to the original. Some things were not entirely apparent from the paper, key model details were often hidden in one line, and took several tries to get right. Other minutia were found out independently. We've included what we found to work well.
  * **Model**: 4096-d mLSTM, 64-d embedding, 256-d output. (we also trained a similarly parameterized lstm)
- * **Weight Norm**: applied only to lstm parameters (hidden->hidden/gate weights), not embedding or output. 
+ * **Weight Norm**: Applied only to lstm parameters (hidden->hidden/gate weights), not embedding or output. 
  * **Optimizer**: Adam
  * **Learning Rate**: 5e-4 per batch of 128. Linear Learning rate decay to 0 over course of epoch.
  * **Gradient Clipping**: We occassionally ran into problems with destabilizing gradient explosions. Therfore, we clipped our gradients to a maximum of `1.`.
@@ -23,11 +23,12 @@ It took several cycles of trial and error to come up with a result comparable to
  * **Hardware**: 8 volta-class gpus
  * **Learning Rate Scaling**: We took queues from recent work in training imagenet at scale and leveraged [FAIR's (Goyal et. al 2017)](https://arxiv.org/pdf/1706.02677.pdf) linear scaling rule.  However, after sufficient experimentation we found that learning rate scaling did not work well at all batch sizes and we capped our max learning rate at 3e-3. We also found that using a linear decay rate over 100k steps for global batch sizes greater than 2048 worked well in our case.
  * **Training Time**: With FP16 training it takes approximately 17 hours to train.
- * **Training command**: To run this training experiment run `./experiments/run_mlstm_singlenode.sh`.
+ * **Training command**: To run this training experiment run `./experiments/train_mlstm_singlenode.sh`.
 
 ### Transformer Training Set Up
 The transformer model has demonstrated its capabilities in recent work as a state of the art language model for natural language understanding. We similarly leveraged the transformer in our work on [Practical Text Classification With Large Pre-Trained Language Models](https://arxiv.org/abs/1812.01207). The transformer we used was pre trained as follows.
  * **Model**: Transformer with 12 layers, 8 attention heads, hidden size of 768, and an embedding size of 3072. Positional embeddings up to length 256 were used.
+ * **Weight Norm**: Applied only to transformer and output head parameters, not embedding parameters. 
  * **Optimizer**: Adam
  * **Learning Rate**: 1e-4 with cosine annealing schedule
  * **Data set**: Aggressively Deduplicated Amazon Review dataset with 1000/1/1 train/test/validation shards. Each of the three sets are internally shuffled.
@@ -37,7 +38,7 @@ The transformer model has demonstrated its capabilities in recent work as a stat
  * **Hardware**: 1 DGX-1V with 8 V100 GPUs
  * **Learning rate Scaling**: In our experiences we found that learning rate scaling as a function of available compute did not help train our transformer, and that a learning rate of 1e-4 across all global batch sizes was simple and performed well.
  * **Training time**: With FP16 training it takes approximately 3 days to train.
- * **Training command**: To run this training experiment run `./experiments/run_transformer_singlenode.sh`.
+ * **Training command**: To run this training experiment run `./experiments/train_transformer_singlenode.sh`.
 
 
 ## FP16 Training
@@ -88,6 +89,18 @@ Since no test set is available we report our numbers on the validation set. To r
 Results should line up approximately with below.
 
 ![SemEval Classifier Results](../figures/semeval_results.png)
+
+## ELMo Comparison
+To analyze how our pretraining, transfer, and finetuning methods stack up to other state of the art models and techniques we utilize the publicly available ELMo language model as a baseline. In order to reproduce our results with ELMo please switch to the [ELMo branch](https://github.com/NVIDIA/sentiment-discovery/tree/elmo).
+
+To train a text classifier with ELMo we utilize ELMo as a language model to encode text whose features are passed to a classifier. The classifier can either be a simple linear layer or a more complex multilayer perceptron. The training can either be performed with end to end training of the classifier and language model, or in a transfer learning setting with only the classifier being trained via logistic regression or SGD.
+
+The following training scripts are capable of reproducing our results with ELMo on SST and the SemEval benchmark challenge. In order to run these scripts you must follow the installation instructions in AllenNLP's [ELMo repository](https://github.com/allenai/allennlp/blob/master/tutorials/how_to/elmo.md). Note that for finetuning we did not use an auxliary language modeling loss as ELMo is bidirectional and cannot perform Left to Right language modeling normally. 
+
+```
+bash ./run_elmo_sk_sst.sh 								#trains a logistic regression classifier on SST with ELMo
+bash ./run_elmo_se_multihead.sh                         #end to end finetuning of ELMo and a multihead MLP on 8 SemEval categories
+```
 
 ------
 

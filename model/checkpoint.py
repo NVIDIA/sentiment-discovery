@@ -2,9 +2,13 @@
 # BSD 3-Clause License
 #
 # Copyright (c) 2018, NVIDIA CORPORATION. All rights reserved.
-#
-# Author & Contact: Raul Puri (raulp@nvidia.com)
+#   
+# Copyright (c) 2016, Facebook, inc (Adam Paszke). All rights reserved.
 ###############################################################################
+'''
+Code adapted from https://github.com/pytorch/fairseq/blob/master/fairseq/models/transformer.py
+Introduced rng management in order to get correct results with random layers (eg. dropout)
+'''
 
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch
