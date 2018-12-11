@@ -19,7 +19,7 @@ from model import DistributedDataParallel as DDP
 
 from apex.reparameterization import apply_weight_norm, remove_weight_norm
 from configure_data import configure_data
-from learning_rates import LinearLR, CosineAnnealingLR, WarmupLR, SlantedTriangularLR
+from learning_rates import AnnealingLR, WarmupLR, SlantedTriangularLR
 from arguments import add_general_args, add_model_args, add_unsupervised_data_args
 
 rnn_model = None
@@ -43,7 +43,7 @@ def setup_model_and_optim(args, train_data, tokenizer):
 
 
     optim = None
-    if args.load != '':
+    if args.load is not None and args.load != '':
         sd = torch.load(args.load, map_location='cpu')
         if args.load_optim:
             #optim_sd = torch.load(os.path.join(os.path.dirname(args.load), 'optim.pt'), map_location='cpu')
@@ -53,12 +53,18 @@ def setup_model_and_optim(args, train_data, tokenizer):
         try:
             model.load_state_dict(sd)
         except:
-            apply_weight_norm(model, hook_child=False)
+            if hasattr(model, 'rnn'):
+                apply_weight_norm(model.rnn, hook_child=False)
+            else:
+                apply_weight_norm(model, hook_child=False)
             model.load_state_dict(sd)
             remove_weight_norm(model)
 
     if not args.no_weight_norm:
-        apply_weight_norm(model, hook_child=False)
+        if hasattr(model, 'rnn'):
+            apply_weight_norm(model.rnn, hook_child=False)
+        else:
+            apply_weight_norm(model, hook_child=False)
 
     if optim is None:
         optim_choice = 'Adam' if args.stlr_cut_frac else args.optim
@@ -87,13 +93,14 @@ def setup_model_and_optim(args, train_data, tokenizer):
             init_step = optim_sd['iter']-optim_sd['skipped_iter']
             train_data.batch_sampler.start_iter = (optim_sd['iter'] % len(train_data)) + 1
 
-        if args.stlr_cut_frac is None:
-            LR = CosineAnnealingLR(optim, start_lr=args.lr, warmup_iter=200, num_iters=num_iters)
-        else:
+        warmup_iter = args.warmup * num_iters
+
+        if args.stlr_cut_frac is not None:
             LR = SlantedTriangularLR(optim, cut_frac=args.stlr_cut_frac, num_iters=num_iters)
+        else:
+            LR = AnnealingLR(optim, start_lr=args.lr, warmup_iter=warmup_iter, num_iters=num_iters, decay_style=args.decay_style)
 
         if args.warmup != 0:
-            warmup_iter = args.warmup * num_iters
             LR_Warmer = WarmupLR(optim, warmup_iter, last_iter=init_step)
 
     # wrap model for distributed training
@@ -270,6 +277,7 @@ def train(epoch, model, optim, train_data, LR, LR_Warmer, criterion, args, total
     cur_time = time.time()
     elapsed = cur_time - start_time
     total_elapsed = cur_time - t0 + elapsed_time
+    cur_loss = total_loss.item() / args.log_interval
     log(epoch, max_iters, lr, elapsed * 1000/ elapsed_iters, total_elapsed,
         cur_loss, args.loss_scale if not args.fp16 else optim.loss_scale)
 
@@ -286,7 +294,7 @@ def main():
     torch.backends.cudnn.enabled = False
     args.cuda = torch.cuda.is_available()
 
-    if args.multinode_init:
+    if args.multinode_init or args.world_size <= 1:
         args.rank = int(os.getenv('RANK', 0))
         args.world_size = int(os.getenv("WORLD_SIZE", 1))
 
@@ -348,16 +356,19 @@ def main():
                 print('entering eval')
                 val_loss = evaluate(val_data, model, criterion, args)
             print('-' * 89)
-            print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
-                  'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
+            print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.4f} | '
+                  'valid ppl {:8.4f}'.format(epoch, (time.time() - epoch_start_time),
                                              val_loss, math.exp(min(val_loss, 20))))
             print('-' * 89)
             # Save the model if the validation loss is the best we've seen so far.
-            if not best_val_loss or val_loss < best_val_loss and args.rank <= 0:
+            if (not best_val_loss or val_loss < best_val_loss) and args.rank <= 0:
                 torch.save(model.state_dict(), args.save)
                 best_val_loss = val_loss
             if args.world_size == 1 or torch.distributed.get_rank() == 0:
-                os.remove(args.save+'.train_lock')
+                try:
+                    os.remove(args.save+'.train_lock')
+                except:
+                    pass
 #            if args.world_size > 1:
 #                torch.distributed.barrier()
             torch.cuda.synchronize()
@@ -371,20 +382,18 @@ def main():
 
     # Load the best saved model.
     #if os.path.exists(args.save):
-    ##    with open(args.save, 'rb') as f:
     #    model.load_state_dict(torch.load(args.save, 'cpu'))
 
-    #if not args.no_weight_norm and args.rank <= 0:
-    #    remove_weight_norm(rnn_model)
-    #    with open(args.save, 'wb') as f:
-    #        torch.save(model.state_dict(), f)
+    # if not args.no_weight_norm and args.rank <= 0:
+    #    remove_weight_norm(model)
+    #    torch.save(model.state_dict(), args.save)
 
     if test_data is not None:
         # Run on test data.
         print('entering test')
         test_loss = evaluate(test_data, model, criterion, args)
         print('=' * 89)
-        print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
+        print('| End of training | test loss {:5.4f} | test ppl {:8.4f}'.format(
             test_loss, math.exp(min(test_loss, 20))))
         print('=' * 89)
 

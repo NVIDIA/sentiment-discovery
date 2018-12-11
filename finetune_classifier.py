@@ -76,25 +76,28 @@ def get_model_and_optim(args, train_data):
     # load char embedding and recurrent encoder for featurization
     if args.load is not None and args.load != '':
         with open(args.load, 'rb') as f:
-            sd = x = torch.load(f)
+            sd = x = torch.load(f, 'cpu')
             if 'sd' in sd:
                 sd = sd['sd']
-            if not args.load_finetuned and 'encoder' in sd:
-                sd = sd['encoder']
 
         if not args.load_finetuned:
+            if 'lm_encoder' in sd:
+                sd = sd['lm_encoder']
             try:
-                model.encoder.load_state_dict(sd)
+                model.lm_encoder.load_state_dict(sd)
             except:
                 # if state dict has weight normalized parameters apply and remove weight norm to model while loading sd
-                if hasattr(model.encoder, 'rnn'):
-                    apply_weight_norm(model.encoder.rnn)
+                if hasattr(model.lm_encoder, 'rnn'):
+                    apply_weight_norm(model.lm_encoder.rnn)
                 else:
-                    apply_weight_norm(model.encoder)
-                model.encoder.load_state_dict(sd)
+                    apply_weight_norm(model.lm_encoder)
+                model.lm_encoder.load_state_dict(sd)
                 remove_weight_norm(model)
         else:
             model.load_state_dict(sd)
+
+    if args.thresh_test_preds:
+        model.set_thresholds(pd.read_csv(args.thresh_test_preds, header=None).values.squeeze(), args.double_thresh, args.dual_thresh and not args.joint_binary_train)
 
     optims = {
         'adam' : 'Adam',
@@ -133,7 +136,7 @@ def get_model_and_optim(args, train_data):
         LR = ConstantLR(optim, lr=args.lr)
     return model, optim, LR
 
-def get_supervised_batch(batch, use_cuda, model, ids=False, args=None, save_outputs=False,  heads_per_class=1):
+def get_supervised_batch(batch, use_cuda, model, max_seq_len=None, args=None, save_outputs=False,  heads_per_class=1):
     '''
     Process batch and return tuple of (text, text label, text length) long tensors.
     Text is returned in column format with (time, batch) dimensions.
@@ -147,14 +150,14 @@ def get_supervised_batch(batch, use_cuda, model, ids=False, args=None, save_outp
     text = Variable(text).long()
     timesteps = Variable(timesteps).long()
     labels = Variable(labels)
+    if max_seq_len is not None:
+        text = text[:, :max_seq_len]
+        timesteps = torch.clamp(timesteps, max=args.max_seq_len)
     if args.use_softmax:
         labels = Variable(labels).view(-1).long()
-    elif heads_per_class > 1:
-        labels = labels.view(labels.size(0), -1, 1)
-        labels = labels.expand(-1,-1,heads_per_class)
-        labels = Variable(labels).view(-1, heads_per_class).float()
     else:
-        labels = labels.view(-1, model.out_dim).float()
+        labels = labels.view(-1, int(model.out_dim/model.heads_per_class)).float()
+
     if use_cuda:
         text, timesteps, labels = text.cuda(), timesteps.cuda(), labels.cuda()
     return text, labels, timesteps-1
@@ -166,11 +169,16 @@ def transform(model, text_batch, labels_batch, length_batch, args, LR=None):
         if args.model.lower() == 'transformer' or args.model.lower() == 'bert' or args.model.lower() == 'elmo':
             class_out, (lm_or_encoder_out, state) = model(text_batch, length_batch, args.get_hidden)
         else:
-            model.encoder.rnn.reset_hidden(args.batch_size)
+            model.lm_encoder.rnn.reset_hidden(args.batch_size)
             for _ in range(1 + args.num_hidden_warmup):
                 class_out, (lm_or_encoder_out, state) = model(text_batch, length_batch, args.get_hidden)
-        if args.use_softmax:
-            class_out = torch.max(class_out,-1)[1].view(-1,1)
+        # if args.heads_per_class > 1:
+        #     class_out, mean_out, std_out = class_out
+        # if args.use_softmax:
+        #     class_out = torch.max(class_out,-1)[1].view(-1,1)
+        # class_out = class_out.float()
+        # if args.heads_per_class > 1:
+        #     class_out = class_out, mean_out, std_out
         return class_out, (lm_or_encoder_out, state)
 
     if LR is not None and not args.use_logreg:
@@ -180,7 +188,7 @@ def transform(model, text_batch, labels_batch, length_batch, args, LR=None):
         with torch.no_grad():
             class_out, lm_or_encoder_out = get_outs()
 
-    class_out = class_out.float().view(-1, model.out_dim)
+    # class_out = class_out.float().view(-1, model.out_dim)
     return class_out, lm_or_encoder_out
 
 def train_logreg(args, trX, trY, vaX=None, vaY=None, teX=None, teY=None, penalty='l1', max_iter=100,
@@ -203,7 +211,7 @@ def train_logreg(args, trX, trY, vaX=None, vaY=None, teX=None, teY=None, penalty
                 model = LogisticRegression(C=c, penalty=penalty, max_iter=max_iter, random_state=seed)
                 model.fit(trX, trY)
                 blank_info_dict = {'fp' : 0, 'tp' : 0, 'fn' : 0, 'tn' : 0, 'std' : 0.,
-                                   'metric' : args.metric, 'micro' : args.micro}
+                                   'metric' : args.threshold_metric, 'micro' : args.micro}
                 if vaX is not None:
                     info_dict = update_info_dict(blank_info_dict.copy(), vaY, model.predict_proba(vaX)[:, -1])
                 else:
@@ -218,7 +226,7 @@ def train_logreg(args, trX, trY, vaX=None, vaY=None, teX=None, teY=None, penalty
                     _model = LogisticRegression(C=c, penalty=penalty, max_iter=max_iter, random_state=seed)
                     _model.fit(trX, trY[:, cls])
                     blank_info_dict = {'fp' : 0, 'tp' : 0, 'fn' : 0, 'tn' : 0, 'std' : 0.,
-                                       'metric' : args.metric, 'micro' : args.micro}
+                                       'metric' : args.threshold_metric, 'micro' : args.micro}
                     if vaX is not None:
                         info_dict = update_info_dict(blank_info_dict.copy(), vaY[:, cls], _model.predict_proba(vaX)[:, -1])
                     else:
@@ -246,7 +254,7 @@ def train_logreg(args, trX, trY, vaX=None, vaY=None, teX=None, teY=None, penalty
     if n_classes == 1:
         nnotzero = np.sum(model.coef_ != 0)
         preds = model.predict_proba(trX)[:, -1]
-        train_score = get_metric(update_info_dict(blank_info_dict.copy(), trY, preds))
+        train_score = get_metric(update_info_dict(blank_info_dict.copy(), trY, preds), args.report_metric)
     else:
         nnotzero = 0
         preds = []
@@ -257,7 +265,7 @@ def train_logreg(args, trX, trY, vaX=None, vaY=None, teX=None, teY=None, penalty
             info_dicts.append(update_info_dict(blank_info_dict.copy(), trY[:, cls], _preds))
             preds.append(_preds)
         nnotzero/=n_classes
-        train_score = get_metric(info_dicts)
+        train_score = get_metric(info_dicts, args.report_metric)
         preds = np.concatenate([p.reshape((-1, 1)) for p in preds], axis=1)
     scores.append(train_score * 100)
     if vaX is None:
@@ -269,7 +277,7 @@ def train_logreg(args, trX, trY, vaX=None, vaY=None, teX=None, teY=None, penalty
         eval_labels = vaY
         if n_classes == 1:
             preds = model.predict_proba(vaX)[:, -1]
-            val_score = get_metric(update_info_dict(blank_info_dict.copy(), vaY, preds))
+            val_score = get_metric(update_info_dict(blank_info_dict.copy(), vaY, preds), args.report_metric)
         else:
             preds = []
             info_dicts = []
@@ -277,7 +285,7 @@ def train_logreg(args, trX, trY, vaX=None, vaY=None, teX=None, teY=None, penalty
                 _preds = model[cls].predict_proba(vaX)[:, -1]
                 info_dicts.append(update_info_dict(blank_info_dict.copy(), vaY[:, cls], _preds))
                 preds.append(_preds)
-            val_score = get_metric(info_dicts)
+            val_score = get_metric(info_dicts, args.report_metric)
             preds = np.concatenate([p.reshape((-1, 1)) for p in preds], axis=1)
     val_preds = preds
     val_labels = eval_labels
@@ -285,7 +293,7 @@ def train_logreg(args, trX, trY, vaX=None, vaY=None, teX=None, teY=None, penalty
     eval_score = val_score
     threshold = .5
     if args.automatic_thresholding:
-        _, threshold, _, _ = _binary_threshold(preds.reshape(-1,1), eval_labels.reshape(-1,1), args.metric, args.micro)
+        _, threshold, _, _ = _binary_threshold(preds.reshape(-1,1), eval_labels.reshape(-1,1), args.threshold_metric, args.micro)
         threshold = float(threshold.squeeze())
     if teX is not None and teY is not None and eval_test:
         eval_data = teX
@@ -299,12 +307,12 @@ def train_logreg(args, trX, trY, vaX=None, vaY=None, teX=None, teY=None, penalty
                 preds.append(_preds)
             preds = np.concatenate([p.reshape((-1, 1)) for p in preds], axis=1)
     if n_classes == 1:
-        eval_score = get_metric(update_info_dict(blank_info_dict.copy(), eval_labels, preds, threshold=threshold))
+        eval_score = get_metric(update_info_dict(blank_info_dict.copy(), eval_labels, preds, threshold=threshold), args.report_metric)
     else:
         info_dicts = []
         for cls in range(n_classes):
             info_dicts.append(update_info_dict(blank_info_dict.copy(), eval_labels[:, cls], preds[:, cls]))
-        eval_score = get_metric(info_dicts)
+        eval_score = get_metric(info_dicts, args.report_metric)
 
     scores.append(eval_score * 100)
     return model, scores, c, nnotzero
@@ -319,38 +327,44 @@ def finetune(model, text, args, val_data=None, LR=None, reg_loss=None, tqdm_desc
     '''
     # NOTE: If in training mode, do not run in .eval() mode. Bug fixed.
     if LR is None:
-        model.encoder.eval()
+        model.lm_encoder.eval()
         model.classifier.eval()
     else:
         # Very important to reset back to train mode for future epochs!
-        model.encoder.train()
+        model.lm_encoder.train()
         model.classifier.train()
 
     # Optionally, freeze language model (train MLP only)
     # NOTE: un-freeze gradients if they every need to be tweaked in future iterations
     if args.freeze_lm:
-        for param in model.encoder.parameters():
+        for param in model.lm_encoder.parameters():
             param.requires_grad = False
 
     # Choose which losses to implement
     if args.use_softmax:
-        binary_loss_fn = torch.nn.CrossEntropyLoss()
+        if heads_per_class > 1:
+            clf_loss_fn = M.MultiHeadCrossEntropyLoss(heads_per_class=heads_per_class)
+        else:
+            clf_loss_fn = torch.nn.CrossEntropyLoss()
     else:
-        binary_loss_fn = torch.nn.BCELoss()
+        if heads_per_class > 1:
+            clf_loss_fn = M.MultiHeadBCELoss(heads_per_class=heads_per_class)
+        else:
+            clf_loss_fn = torch.nn.BCELoss()
     if args.aux_lm_loss:
         aux_loss_fn = torch.nn.CrossEntropyLoss(reduce=False)
     else:
         aux_loss_fn = None
 
     if args.thresh_test_preds:
-        thresholds = pd.read_csv(args.thresh_test_preds, header=None).values.squeeze()
+        thresholds = model.get_thresholds()
     elif len(last_thresholds) > 0:
         # Re-use previous thresholds, if provided.
         # Why? More accurate reporting, and not that slow. Don't compute thresholds on training, for example -- but can recycle val threshold
         thresholds = last_thresholds
     else:
         # Default thresholds -- faster, but less accurate
-        thresholds = np.array([default_threshold for _ in range(model.out_dim)])
+        thresholds = np.array([default_threshold for _ in range(int(model.out_dim/heads_per_class))])
 
     total_loss = 0
     total_classifier_loss = 0
@@ -358,13 +372,13 @@ def finetune(model, text, args, val_data=None, LR=None, reg_loss=None, tqdm_desc
     total_multihead_variance_loss = 0
     class_accuracies = torch.zeros(model.out_dim).cuda()
     if model.out_dim/heads_per_class > 1 and not args.use_softmax:
-        keys = args.non_binary_cols
+        keys = list(args.non_binary_cols)
     elif args.use_softmax:
         keys = [str(m) for m in range(model.out_dim)]
     else:
         keys = ['']
     info_dicts = [{'fp' : 0, 'tp' : 0, 'fn' : 0, 'tn' : 0, 'std' : 0,
-                   'metric' : args.metric, 'micro' : args.micro} for k in keys]
+                   'metric' : args.report_metric, 'micro' : args.micro} for k in keys]
 
     # Sanity check -- should do this sooner. Does #classes match expected output?
     assert model.out_dim == len(keys) * heads_per_class, "model.out_dim does not match keys (%s) x heads_per_class (%d)" % (keys, heads_per_class)
@@ -373,12 +387,23 @@ def finetune(model, text, args, val_data=None, LR=None, reg_loss=None, tqdm_desc
     # Save all outputs *IF* small enough, and requested for thresholding -- basically, on validation
     #if threshold_validation and LR is not None:
     all_batches = []
+    all_stds = []
     all_labels = []
-    print('Running %d batches' % len(text))
     for i, data in tqdm(enumerate(text), total=len(text), unit="batch", desc=tqdm_desc, position=1, ncols=100):
-        text_batch, labels_batch, length_batch = get_supervised_batch(data, args.cuda, model, args.ids, args, heads_per_class=args.heads_per_class)
+        text_batch, labels_batch, length_batch = get_supervised_batch(data, args.cuda, model, args.max_seq_len, args, heads_per_class=args.heads_per_class)
         class_out, (lm_out, _) = transform(model, text_batch, labels_batch, length_batch, args, LR)
-        classifier_loss = binary_loss_fn(class_out, labels_batch)
+        class_std = None
+        if heads_per_class > 1:
+            all_heads, class_out, class_std, clf_out = class_out
+            classifier_loss = clf_loss_fn(all_heads, labels_batch)
+        else:
+            class_out, clf_out = class_out
+            if args.dual_thresh:
+                class_out = class_out[:, :-1]
+            classifier_loss = clf_loss_fn(class_out, labels_batch)
+            if args.use_softmax:
+                class_out = F.softmax(class_out, -1)
+
         loss = classifier_loss
         classifier_loss = classifier_loss.clone() # save for reporting
         # Also compute multihead variance loss -- from classifier [divide by output size since it scales linearly]
@@ -412,63 +437,50 @@ def finetune(model, text, args, val_data=None, LR=None, reg_loss=None, tqdm_desc
         total_loss += loss.detach().cpu().numpy()
         if args.use_softmax:
             labels_batch = onehot(labels_batch.squeeze(), model.out_dim)
-            class_out = onehot(torch.max(class_out, -1)[1].squeeze(), model.out_dim/heads_per_class)
+            class_out = onehot(clf_out.view(-1), int(model.out_dim/heads_per_class))
         total_classifier_loss += classifier_loss.detach().cpu().numpy()
         if args.aux_lm_loss:
             total_lm_loss += lm_loss.detach().cpu().numpy()
         if args.aux_head_variance_loss_weight > 0:
             total_multihead_variance_loss += multihead_variance_loss.detach().cpu().numpy()
-        for j in range(model.out_dim):
-            info_dicts[math.floor(j/heads_per_class)] = update_info_dict(info_dicts[math.floor(j/heads_per_class)], labels_batch[:, j], class_out[:, j], thresholds[j])
+        for j in range(int(model.out_dim/heads_per_class)):
+            std = None
+            if class_std is not None:
+                std = class_std[:,j]
+            info_dicts[j] = update_info_dict(info_dicts[j], labels_batch[:, j], class_out[:, j], thresholds[j], std=std)
         # Save, for overall thresholding (not on training)
         if threshold_validation and LR is None:
             all_labels.append(labels_batch.detach().cpu().numpy())
             all_batches.append(class_out.detach().cpu().numpy())
+            if class_std is not None:
+                all_stds.append(class_std.detach().cpu().numpy())
 
     if threshold_validation and LR is None:
         all_batches = np.concatenate(all_batches)
         all_labels = np.concatenate(all_labels)
+        if heads_per_class > 1:
+            all_stds = np.concatenate(all_stds)
         # Compute new thresholds -- per class
-        _, thresholds, _, _ =  _binary_threshold(all_batches, all_labels, args.threshold_metric, True, global_tweaks=0, heads_per_class=heads_per_class, class_single_threshold=False)
+        _, thresholds, _, _ =  _binary_threshold(all_batches, all_labels, args.threshold_metric, args.micro, global_tweaks=args.global_tweaks)
         info_dicts = [{'fp' : 0, 'tp' : 0, 'fn' : 0, 'tn' : 0, 'std' : 0.,
-               'metric' : args.metric, 'micro' : args.micro} for k in keys]
+               'metric' : args.report_metric, 'micro' : args.micro} for k in keys]
         # In multihead case, look at class averages? Why? More predictive. Works especially well when we force single per-class threshold.
-        if heads_per_class > 1 and args.use_class_multihead_average:
-            for j in range(int(model.out_dim/heads_per_class)):
-                # Pass long std/variances per class, as well!
-                info_dicts[j] = update_info_dict(info_dicts[j],
-                    all_labels[:, j*heads_per_class:(j+1)*heads_per_class].sum(1)/heads_per_class,
-                    all_batches[:, j*heads_per_class:(j+1)*heads_per_class].sum(1)/heads_per_class,
-                    threshold=thresholds[j*heads_per_class:(j+1)*heads_per_class].sum()/heads_per_class,
-                    std=all_batches[:, j*heads_per_class:(j+1)*heads_per_class].std(1))
-        else:
-            for j in range(model.out_dim):
-                info_dicts[math.floor(j/heads_per_class)] = update_info_dict(info_dicts[math.floor(j/heads_per_class)], all_labels[:, j], all_batches[:, j], thresholds[j])
+        for j in range(int(model.out_dim/heads_per_class)):
+            std = None
+            if heads_per_class > 1:
+                std = all_stds[:, j]
+            info_dicts[j] = update_info_dict(info_dicts[j], all_labels[:, j], all_batches[:, j], thresholds[j], std=std)
 
     # Metrics for all items -- with current best thresholds
     total_metrics, class_metric_strs = get_metric_report(info_dicts, args, keys, LR)
 
     # Show losses
     if debug:
-        print('losses -- total / classifier / LM / multihead_variance')
-        print(total_loss * batch_adjustment)
-        print(total_classifier_loss * batch_adjustment)
-        print(total_lm_loss * batch_adjustment)
-        print(total_multihead_variance_loss * batch_adjustment)
-
-    # class_metric_strs, total_metrics = [], []
-    # report_metrics = ['mcc', 'f1'] if args.all_metrics else [args.metric]
-    # for m in report_metrics:
-    #     for d in info_dicts:
-    #         d.update({'metric' : m})
-    #     class_metrics = [get_metric(d) for d in info_dicts]
-    #     total_metrics.append(get_metric(info_dicts))
-
-    #     if LR is not None:
-    #         delim = '-'
-    #     else:
-    #         delim = {'mcc' : '#', 'f1' : '+', 'jacc' : '=', 'acc' : '>'}[m]
-    #     class_metric_strs.append(", ".join('{} {} {:5.2f}'.format(k, delim, f * 100) for k, f in zip(keys, class_metrics)))
+        tqdm.write('losses -- total / classifier / LM / multihead_variance')
+        tqdm.write(total_loss * batch_adjustment)
+        tqdm.write(total_classifier_loss * batch_adjustment)
+        tqdm.write(total_lm_loss * batch_adjustment)
+        tqdm.write(total_multihead_variance_loss * batch_adjustment)
 
     return total_loss.item() / (i + 1), total_metrics, class_metric_strs, thresholds
 
@@ -480,8 +492,7 @@ def onehot(sparse, nclasses):
 
 def get_metric_report(info_dicts, args, keys=['-'], LR=None):
     class_metric_strs, total_metrics = [], []
-    # report_metrics = ['jacc', 'acc', 'mcc', 'f1', 'var'] if args.all_metrics else [args.metric]
-    report_metrics = ['jacc', 'acc', 'mcc', 'f1', 'recall', 'precision', 'var'] if args.all_metrics else [args.metric]
+    report_metrics = ['jacc', 'acc', 'mcc', 'f1', 'recall', 'precision', 'var'] if args.all_metrics else [args.report_metric]
     for m in report_metrics:
         for d in info_dicts:
             d.update({'metric' : m})
@@ -498,67 +509,39 @@ def get_metric_report(info_dicts, args, keys=['-'], LR=None):
 
 def generate_outputs(model, text, args, thresholds=None, debug=False):
     model.eval()
-    collected_outputs = torch.zeros(1, model.out_dim).cuda()
-    # Average across heads in a category, if requested
-    if args.use_class_multihead_average and thresholds is not None:
-        collected_outputs = torch.zeros(1, int(model.out_dim/args.heads_per_class)).cuda()
-    collected_labels = collected_outputs.clone()
+    collected_outputs = []
+    collected_labels = []
     # Collect category standard deviations, across multiple heads
-    collected_outputs_std = collected_outputs.clone()
-    if args.thresh_test_preds:
-        thresholds = pd.read_csv(args.thresh_test_preds, header=None).values.squeeze()
-        assert len(thresholds) == model.out_dim or args.double_thresh
-        collected_outputs = collected_outputs.long()
-    elif thresholds is not None:
-        thresholds = thresholds.squeeze()
-        if args.use_class_multihead_average:
-            thresholds_average = thresholds.reshape(-1,args.heads_per_class).sum(1)/args.heads_per_class
-            if debug:
-                print(thresholds_average)
-            thresholds = thresholds_average
+    collected_outputs_std = []
 
     for i, data in tqdm(enumerate(text), total=len(text), unit='batch', desc='predictions', position=1, ncols=100):
-        text_batch, labels_batch, length_batch = get_supervised_batch(data, args.cuda, model, args.ids, args, save_outputs=True, heads_per_class=args.heads_per_class)
+        text_batch, labels_batch, length_batch = get_supervised_batch(data, args.cuda, model, args.max_seq_len, args, save_outputs=True, heads_per_class=args.heads_per_class)
         class_out, (lm_out, _) = transform(model, text_batch, labels_batch, length_batch, args)
         # Take the average per-category if requested
-        if args.use_class_multihead_average and thresholds is not None:
-            class_average = class_out.view(class_out.shape[0],-1,args.heads_per_class).contiguous().mean(2)
-            labels_average = labels_batch.view(labels_batch.shape[0],-1,args.heads_per_class).contiguous().mean(2)
-            # Also compute variance per item, per category [for reporting, and for active learning]
-            class_std = class_out.view(class_out.shape[0],-1,args.heads_per_class).contiguous().std(2)
-            class_out = class_average
-            labels_batch = labels_average
+        if args.heads_per_class > 1:
+            _, class_out, class_std, clf_out = class_out
         else:
+            class_out, clf_out = class_out
+            if args.use_softmax:
+                class_out = F.softmax(class_out, -1)
             class_std = torch.zeros(class_out.shape)
 
         if args.thresh_test_preds or thresholds is not None:
-            if args.double_thresh:
-                def double_thresh(x):
-                    if x > max(thresholds):
-                        return 1
-                    elif x > min(thresholds):
-                        return 0.5
-                    else:
-                        return 0
-                class_out = pd.Series(class_out.squeeze().cpu().numpy()).apply(double_thresh).values.astype(int).reshape(-1, 1)
-            else:
-                class_out = (class_out > torch.tensor(thresholds).cuda().float()).long()
+            class_out = clf_out
 
         if args.use_softmax:
-            labels_batch = onehot(labels_batch.squeeze(), model.out_dim).cuda()
-            class_out = onehot(torch.max(class_out, -1)[1].squeeze(), model.out_dim)
+            labels_batch = onehot(labels_batch.squeeze(), int(model.out_dim/args.heads_per_class)).cuda()
+            class_out = onehot(torch.max(clf_out, -1)[1].squeeze(), int(model.out_dim/args.heads_per_class))
 
-        collected_outputs = torch.cat((collected_outputs, torch.tensor(class_out).cuda().float()), 0)
-        collected_labels = torch.cat((collected_labels, labels_batch), 0)
-        collected_outputs_std = torch.cat((collected_outputs_std, torch.tensor(class_std).cuda().float()), 0)
+        collected_outputs.append(torch.tensor(class_out).cuda().float())
+        collected_labels.append(labels_batch)
+        collected_outputs_std.append(torch.tensor(class_std).cuda().float())
 
-    if not args.automatic_thresholding and not args.use_softmax:
-        write_results(np.array(collected_outputs[1:]), np.array(collected_labels[1:]), args.save_test_preds)
-        # np.savetxt(args.save_test_preds, np.array(collected_outputs[1:]), delimiter=',')
-        # labels_file = os.path.splitext(args.save_test_preds)[0] + '_labels.txt'
-        # np.savetxt(labels_file, np.array(collected_labels[1:]), delimiter=',')
-    else:
-        return collected_outputs[1:], collected_labels[1:], collected_outputs_std[1:]
+    collected_outputs = torch.cat(collected_outputs, 0)
+    collected_outputs_std = torch.cat(collected_outputs_std, 0)
+    collected_labels = torch.cat(collected_labels, 0)
+
+    return collected_outputs, collected_labels, collected_outputs_std
 
 def write_results(preds, labels, save):
     labels_file = os.path.splitext(save)[0] + '_labels.txt'
@@ -581,10 +564,10 @@ def main():
     # save_root = save_root.replace('.current', '')
     # save_root = os.path.splitext(save_root)[0]
     # save_root += '_transfer'
-    # save_root = os.path.join(save_root, args.model_version_name)
-    # if not os.path.exists(save_root):
-    #     os.makedirs(save_root)
-    # print('writing results to '+save_root)
+    save_root = os.path.join('', args.model_version_name)
+    if not os.path.exists(save_root):
+        os.makedirs(save_root)
+    print('writing results to '+save_root)
 
     def clf_reg_loss(reg_penalty=.125, order=1):
         loss = 0
@@ -592,7 +575,7 @@ def main():
             loss += torch.abs(p).sum()*reg_penalty
         return loss
     reg_loss = clf_reg_loss
-    init_params = list(model.encoder.parameters())
+    init_params = list(model.lm_encoder.parameters())
 
     if args.use_logreg:
         def transform_for_logreg(model, data, args, desc='train'):
@@ -602,7 +585,7 @@ def main():
             X_out = []
             Y_out = []
             for i, batch in tqdm(enumerate(data), total=len(data), unit="batch", desc=desc, position=0, ncols=100):
-                text_batch, labels_batch, length_batch = get_supervised_batch(batch, args.cuda, model, args.ids, args, heads_per_class=args.heads_per_class)
+                text_batch, labels_batch, length_batch = get_supervised_batch(batch, args.cuda, model, args.max_seq_len, args, heads_per_class=args.heads_per_class)
                 # if args.non_binary_cols:
                 #     labels_batch = labels_batch[:,0]-labels_batch[:,1]+1
                 _, (_, state) = transform(model, text_batch, labels_batch, length_batch, args)
@@ -628,9 +611,9 @@ def main():
             if args.use_softmax:
                 vaT = []
             save_outputs = False
-            report_metrics = ['jacc', 'acc','mcc', 'f1', 'recall', 'precision', 'var'] if args.all_metrics else [args.metric]
+            report_metrics = ['jacc', 'acc','mcc', 'f1', 'recall', 'precision', 'var'] if args.all_metrics else [args.report_metric]
             print_str = ""
-            trXt, trY, trC, _ = finetune(model, train_data, args, val_data=val_data, LR=LR, reg_loss=reg_loss, tqdm_desc='train', heads_per_class=args.heads_per_class, last_thresholds=vaT)
+            trXt, trY, trC, _ = finetune(model, train_data, args, val_data=val_data, LR=LR, reg_loss=reg_loss, tqdm_desc='train', heads_per_class=args.heads_per_class, last_thresholds=vaT, threshold_validation=False)
             data_str_base = "Train Loss: {:4.2f} Train {:5s} (All): {:5.2f}, Train Class {:5s}: {}"
             for idx, m in enumerate(report_metrics):
                 data_str = data_str_base.format(trXt, m, trY[idx] * 100, m, trC[idx])
@@ -643,58 +626,62 @@ def main():
                 # NOTE: F1, MCC, Jaccard are good measures. Accuracy is not -- since so skewed.
                 selection_metric = ['jacc', 'acc','mcc', 'f1', 'recall', 'precision', 'var'].index(args.threshold_metric)
                 avg_Y = vaY[selection_metric]
-                tqdm.write('avg_metric '+str(avg_Y))
+                tqdm.write('avg '+args.threshold_metric+' metric '+str(avg_Y))
                 if avg_Y > best_vaY:
+                    save_outputs = True
+                    best_vaY = avg_Y
+                elif avg_Y == best_vaY and random.random() > 0.5:
                     save_outputs = True
                     best_vaY = avg_Y
                 data_str_base = "Val   Loss: {:4.2f} Val   {:5s} (All): {:5.2f}, Val   Class {:5s}: {}"
                 for idx, m in enumerate(report_metrics):
                     data_str = data_str_base.format(vaXt, m, vaY[idx] * 100, m, vaC[idx])
                     print_str += data_str + " " * max(0, 110 - len(data_str)) + "\n"
-                tqdm.write(print_str[:-1])
+            tqdm.write(print_str[:-1])
             teXt, teY = None, None
             if test_data is not None:
                 # Hardcode -- enable to always save outputs [regardless of metrics]
                 # save_outputs = True
                 if save_outputs:
-                    tqdm.write('saving outputs')
+                    tqdm.write('performing test eval')
                     try:
                         with torch.no_grad():
-                            if args.automatic_thresholding or args.report_no_thresholding:
+                            if not args.no_test_eval:
                                 auto_thresholds = None
                                 dual_thresholds = None
                                 # NOTE -- we manually threshold to F1 [not necessarily good]
-                                if not args.report_no_thresholding:
-                                    V_pred, V_label, V_std = generate_outputs(model, val_data, args)
-                                    if args.dual_threshold:
+                                V_pred, V_label, V_std = generate_outputs(model, val_data, args)
+                                if args.automatic_thresholding:
+                                    if args.dual_thresh:
                                         # get dual threshold (do not call auto thresholds)
                                         # TODO: Handle multiple heads per class
                                         _, dual_thresholds = _neutral_threshold_two_output(V_pred.cpu().numpy(), V_label.cpu().numpy())
+                                        model.set_thresholds(dual_thresholds, dual_threshold=args.dual_thresh and not args.joint_binary_train)
                                     else:
                                         # Use args.threshold_metric to choose which category to threshold on. F1 and Jaccard are good options
                                         # NOTE: For multiple heads per class, can threshold each head (default) or single threshold. Little difference once model converges.
-                                        _, auto_thresholds, _, _ = _binary_threshold(V_pred.view(-1, model.out_dim).contiguous(), V_label.view(-1, model.out_dim).contiguous(),
-                                            args.threshold_metric, args.micro, global_tweaks=args.global_tweaks, heads_per_class=args.heads_per_class, class_single_threshold=args.class_single_threshold)
+                                        auto_thresholds = vaT
+                                        # _, auto_thresholds, _, _ = _binary_threshold(V_pred.view(-1, int(model.out_dim/args.heads_per_class)).contiguous(), V_label.view(-1, int(model.out_dim/args.heads_per_class)).contiguous(),
+                                        #     args.threshold_metric, args.micro, global_tweaks=args.global_tweaks)
+                                        model.set_thresholds(auto_thresholds, args.double_thresh)
                                 T_pred, T_label, T_std = generate_outputs(model, test_data, args, auto_thresholds)
-                                if not args.use_softmax and model.out_dim / args.heads_per_class > 1:
+                                if not args.use_softmax and int(model.out_dim/args.heads_per_class) > 1:
                                     keys = list(args.non_binary_cols)
-                                    if args.dual_threshold:
+                                    if args.dual_thresh:
                                         if len(keys) == len(dual_thresholds):
-                                            print('Dual thresholds: %s' % str(list(zip(keys, dual_thresholds))))
-                                    else:
-                                        print('Class thresholds: %s' % str(list(zip(keys, auto_thresholds))))
-                                    #add neutral key to list of keys
-                                    if args.dual_threshold:
+                                            tqdm.write('Dual thresholds: %s' % str(list(zip(keys, dual_thresholds))))
                                         keys += ['neutral']
+                                    else:
+                                        tqdm.write('Class thresholds: %s' % str(list(zip(keys, auto_thresholds))))
                                 elif args.use_softmax:
                                     keys = [str(m) for m in range(model.out_dim)]
                                 else:
-                                    print('Class threshold: %s' % str([args.label_key, auto_thresholds[0]]))
+                                    tqdm.write('Class threshold: %s' % str([args.label_key, auto_thresholds[0]]))
                                     keys = ['']
                                 info_dicts = [{'fp' : 0, 'tp' : 0, 'fn' : 0, 'tn' : 0, 'std' : 0.,
-                                               'metric' : args.metric, 'micro' : True} for k in keys]
+                                               'metric' : args.report_metric, 'micro' : True} for k in keys]
                                 #perform dual threshold here, adding the neutral labels to T_label, thresholding existing predictions and adding neutral preds to T_Pred
-                                if args.dual_threshold:
+                                if args.dual_thresh:
                                     if dual_thresholds is None:
                                         dual_thresholds = [.5, .5]
                                     def make_onehot_w_neutral(label):
@@ -706,8 +693,11 @@ def main():
                                         if thresholded[0] == thresholded[1]:
                                             return 2
                                         return thresholded.index(1)
+                                    def get_new_std(std):
+                                        return std[0], std[1], (std[0]+std[1])/2
                                     new_labels = []
                                     new_preds = []
+                                    T_std = torch.cat([T_std[:,:2], T_std[:,:2].mean(-1).view(-1, 1)], -1).cpu().numpy()
                                     for j, lab in  enumerate(T_label):
                                         pred = T_pred[j]
                                         new_preds.append(make_onehot_w_neutral(get_label(pred)))
@@ -717,43 +707,32 @@ def main():
 
                                 # HACK: If dual threshold, hardcoded -- assume positive, negative and neutral -- in that order
                                 # It's ok to train with other categories (after positive, neutral) as auxilary loss -- but won't calculate in test
-                                if args.dual_threshold:
-                                    print(keys)
+                                if args.dual_thresh and args.joint_binary_train:
                                     keys = ['positive', 'negative', 'neutral']
                                     info_dicts = [{'fp' : 0, 'tp' : 0, 'fn' : 0, 'tn' : 0, 'std' : 0.,
-                                                   'metric' : args.metric, 'micro' : True} for k in keys]
-                                    print(keys)
-                                # In the case of multiple heads per class, group here -- as we iterate over keys
+                                                   'metric' : args.report_metric, 'micro' : True} for k in keys]
                                 for j, k in enumerate(keys):
-                                    # Unless we already grouped average predictions.
-                                    heads = 1 if args.use_class_multihead_average else args.heads_per_class
-                                    for offset in range(heads):
-                                        j_off = j * heads + offset
-                                        # Debug, remove
-                                        #print('%d/%d -- %s' % (j_off, len(keys) * args.heads_per_class, k))
-                                        # If neutrals, derive neutral "STD" from neg, pos average
-                                        if args.dual_threshold:
-                                            neutral_std = torch.cat((T_std[:,0].unsqueeze(1), T_std[:,1].unsqueeze(1)), 1)
-                                            neutral_std = neutral_std.mean(1)
-                                            T_std = torch.cat((T_std, neutral_std.unsqueeze(1)), 1)
-                                            # HACK: For dual threshold, mismatch, get tensor on CPU
-                                            T_std = T_std.cpu()
-                                        p, l, v = T_pred[:,j_off], T_label[:,j_off], T_std[:,j_off]
-                                        update_info_dict(info_dicts[j], p, l, std=v)
-                                tqdm.write(str(info_dicts))
+                                    update_info_dict(info_dicts[j], T_pred[:,j], T_label[:,j], std=T_std[:,j])
                                 total_metrics, metric_strings = get_metric_report(info_dicts, args, keys)
-                                tqdm.write(str(total_metrics))
-                                tqdm.write('; '.join(metric_strings))
-                                # TODO: Write (per item) standard deviations, along with results!
-                                print('Saving prediction results %s to %s' % (str(T_pred.shape), args.save_test_preds))
-                                write_results(T_pred, T_label, args.save_test_preds)
+                                test_str = ''
+                                test_str_base = "Test  {:5s} (micro): {:5.2f}, Test  Class {:5s}: {}"
+                                for idx, m in enumerate(report_metrics):
+                                    data_str = test_str_base.format(m, total_metrics[idx] * 100, m, metric_strings[idx])
+                                    test_str += data_str + " " * max(0, 110 - len(data_str)) + "\n"
+                                tqdm.write(test_str[:-1])
+                                # tqdm.write(str(total_metrics))
+                                # tqdm.write('; '.join(metric_strings))
                             else:
-                                test_preds_path = args.save_test_preds
-                                args.save_test_preds = args.save_test_preds[:-4]+'.val.txt'
-                                tqdm.write(args.save_test_preds)
-                                generate_outputs(model, val_data, args)
-                                args.save_test_preds = test_preds_path
-                                generate_outputs(model, test_data, args)
+                                V_pred, V_label, V_std = generate_outputs(model, val_data, args)
+
+                                T_pred, T_label, T_std = generate_outputs(model, test_data, args)
+                            val_path = os.path.join(save_root, 'val_results.txt')
+                            tqdm.write('Saving validation prediction results of size %s to %s' % (str(T_pred.shape[:]), val_path))
+                            write_results(V_pred, V_label, val_path)
+
+                            test_path = os.path.join(save_root, 'test_results.txt')
+                            tqdm.write('Saving test prediction results of size %s to %s' % (str(T_pred.shape[:]), test_path))
+                            write_results(T_pred, T_label, test_path)
                     except KeyboardInterrupt:
                         pass
                 else:
@@ -763,23 +742,19 @@ def main():
                 # Save model if best so far. Note epoch number, and also keys [what is it predicting], as well as optional version number
                 # TODO: Add key string to handle multiple runs?
                 if args.non_binary_cols:
-                    keys = args.non_binary_cols
+                    keys = list(args.non_binary_cols)
                 else:
                     keys = [args.label_key]
-                model_save_path = os.path.splitext(args.save_test_preds)[0]+'_model_'+args.model_version_name+'_'+'_'.join(keys)+'_ep'+str(e)+'.pt'
-                print('Saving model to %s' % model_save_path)
-                torch.save(model.state_dict(), model_save_path)
                 # Also save args
-                args_save_path = os.path.splitext(args.save_test_preds)[0]+'_args_'+args.model_version_name+'_'+'_'.join(keys)+'_ep'+str(e)+'.txt'
-                print('Args to %s' % args_save_path)
+                args_save_path = os.path.join(save_root, 'args.txt')
+                tqdm.write('Saving commandline to %s' % args_save_path)
                 with open(args_save_path, 'w') as f:
-                    f.write('\n'.join(sys.argv[1:]))
-                # Also save thresholds
-                thresh_save_path = os.path.splitext(args.save_test_preds)[0]+'_thresholds_'+args.model_version_name+'_'+'_'.join(keys)+'_ep'+str(e)+'.npy'
-                print('Thresh to %s' % thresh_save_path)
-                # add thresholds to arguments for easy reloading of model config
-                if not args.report_no_thresholding:
-                    if args.dual_threshold:
+                    f.write(' '.join(sys.argv[1:]))
+                # Save and add thresholds to arguments for easy reloading of model config
+                if not args.no_test_eval and args.automatic_thresholding:
+                    thresh_save_path = os.path.join(save_root, 'thresh'+'_ep'+str(e)+'.npy')
+                    tqdm.write('Saving thresh to %s' % thresh_save_path)
+                    if args.dual_thresh:
                         np.save(thresh_save_path, list(zip(keys, dual_thresholds)))
                         args.thresholds = list(zip(keys, dual_thresholds))
                     else:
@@ -788,8 +763,9 @@ def main():
                 else:
                     args.thresholds = None
                 args.classes = keys
-                clf_save_path = os.path.splitext(args.save_test_preds)[0]+'_model_'+args.model_version_name+'_'+'_'.join(keys)+'_ep'+str(e)+'.clf'
-                print('Saving full classifier to %s' % clf_save_path)
+                #save full model with args to restore
+                clf_save_path = os.path.join(save_root, 'model'+'_ep'+str(e)+'.clf')
+                tqdm.write('Saving full classifier to %s' % clf_save_path)
                 torch.save({'sd': model.state_dict(), 'args': args}, clf_save_path)
 
 

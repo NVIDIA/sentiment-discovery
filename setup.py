@@ -42,5 +42,7 @@ setup(
         "matplotlib",
         "unidecode",
         "seaborn",
+        "sentencepiece",
+        "emoji"
     ]
 )

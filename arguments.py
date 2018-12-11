@@ -1,3 +1,11 @@
+###############################################################################
+# BSD 3-Clause License
+#
+# Copyright (c) 2018, NVIDIA CORPORATION. All rights reserved.
+#
+# Author & Contact: Raul Puri (raulp@nvidia.com)
+###############################################################################
+
 from configure_data import configure_data
 
 def add_general_args(parser):
@@ -47,32 +55,33 @@ def add_general_args(parser):
                         help='One of PyTorch\'s optimizers (Adam, SGD, etc). Default: Adam')
     group.add_argument('--chkpt-grad', action='store_true',
                         help='checkpoint gradients to allow for training with larger models and sequences')
-    group.add_argument('--ids', action='store_true',
-                        help='specify that the data is formatted as ids')
     group.add_argument('--multinode-init', action='store_true',
                         help='initialize multinode. Environment variables should be set as according to https://pytorch.org/docs/stable/distributed.html')
-    
     return parser
 
 def add_unsupervised_data_args(parser):
     data_config, data_group = configure_data(parser)
+    # Set unsupervised L2R language modeling option defaults
     data_config.set_defaults(data_set_type='L2R', transpose=True)
     data_group.set_defaults(split='100,1,1')
+    # Create unsupervised-L2R-specific options
     group = parser.add_argument_group('language modeling data options')
     group.add_argument('--seq-length', type=int, default=256,
-                             help="Maximum sequence length to process (for unsupervised rec)")
+                        help="Maximum sequence length to process (for unsupervised rec)")
     group.add_argument('--eval-seq-length', type=int, default=256,
-                             help="Maximum sequence length to process for evaluation")
+                        help="Maximum sequence length to process for evaluation")
     group.add_argument('--lazy', action='store_true',
-                             help='whether to lazy evaluate the data set')
+                        help='whether to lazy evaluate the data set')
     group.add_argument('--persist-state', type=int, default=1,
-                             help='0=reset state after every sample in a shard, 1=reset state after every shard, -1=never reset state')
+                        help='0=reset state after every sample in a shard, 1=reset state after every shard, -1=never reset state')
     group.add_argument('--train-iters', type=int, default=1000,
-                             help="""number of iterations per epoch to run training for""")
+                        help="""number of iterations per epoch to run training for""")
     group.add_argument('--eval-iters', type=int, default=100,
-                             help="""number of iterations per epoch to run validation/test for""")
+                        help="""number of iterations per epoch to run validation/test for""")
+    group.add_argument('--decay-style', type=str, default=None, choices=['constant', 'linear', 'cosine', 'exponential'],
+                        help='one of constant(None), linear, cosine, or exponential')
     group.add_argument('--stlr-cut-frac', type=float, default=None,
-                             help='what proportion of iterations to peak the slanted triangular learning rate')
+                        help='what proportion of iterations to peak the slanted triangular learning rate')
     group.add_argument('--warmup', type=float, default=0,
                         help='percentage of data to warmup on (.03 = 3% of all training iters). Default 0')
     return data_config, parser
@@ -163,15 +172,15 @@ def add_transformer_args(parser):
     return parser
 
 def add_classifier_model_args(parser):
-    group = parser.add_argument_group('finetune', 'arguments used in training a classifier on top of a language model')
+    group = parser.add_argument_group('classifier', 'arguments used in training a classifier on top of a language model')
+    group.add_argument('--max-seq-len', type=int, default=None,
+                        help='maximum sequence length to use for classification. Transformer uses a lot of memory and needs shorter sequences.')
     group.add_argument('--classifier-hidden-layers', default=None, nargs='+',
                         help='sizes of hidden layers for binary classifier on top of language model, so excluding the input layer and final "1"')
     group.add_argument('--classifier-hidden-activation', type=str, default='PReLU',
                         help='[defaults to PReLU] activations used in hidden layers of MLP classifier (ReLU, Tanh, torch.nn module names)')
     group.add_argument('--classifier-dropout', type=float, default=0.1,
                         help='Dropout in layers of MLP classifier')
-    # group.add_argument('--use-logreg', action='store_true',
-    #                     help='if more than one layer is used, extract features from all layers, not just the last layer')
     group.add_argument('--all-layers', action='store_true',
                         help='if more than one layer is used, extract features from all layers, not just the last layer')
     group.add_argument('--concat-max', action='store_true',
@@ -187,14 +196,24 @@ def add_classifier_model_args(parser):
     group.add_argument('--heads-per-class', type=int, default=1,
                        help='set > 1 for multiple heads per class prediction (variance, regularlization)')
     parser.add_argument('--use-softmax', action='store_true', help='use softmax for classification')
+    group.add_argument('--double-thresh', action='store_true',
+                       help='whether to report all metrics at once')
+    group.add_argument('--dual-thresh', action='store_true',
+                        help='for 2 columns positive and negative, thresholds classes s.t. positive, negative, neutral labels are available')
+    group.add_argument('--joint-binary-train', action='store_true',
+                       help='Train with dual thresholded (positive/negative/neutral) classes and other normal binary classes.\
+                             Arguments to non-binary-cols must be passed with positive negative classes first.\
+                             Ex: `--non-binary-cols positive negative <other classes>`')
 
     group.set_defaults(epochs=5)
     return parser
 
 def add_sentiment_transfer_args(parser):
-    data_config, data_parser = configure_data(parser)
-    data_parser.set_defaults(split='1.', data=['data/binary_sst/train.csv'])
-    data_parser.set_defaults(valid=['data/binary_sst/val.csv'], test=['data/binary_sst/test.csv'])
+    data_config, data_group = configure_data(parser)
+    # Set transfer learning data option defaults
+    data_group.set_defaults(split='1.', data=['data/binary_sst/train.csv'])
+    data_group.set_defaults(valid=['data/binary_sst/val.csv'], test=['data/binary_sst/test.csv'])
+    # Create transfer-learning-specific options
     group = parser.add_argument_group('sentiment_transfer', 'arguments used for sentiment_transfer script')
     group.add_argument('--mcc', action='store_true',
                         help='whether to use the matthews correlation coefficient as a measure of accuracy (for CoLA)')
@@ -205,16 +224,18 @@ def add_sentiment_transfer_args(parser):
     group.add_argument('--write-results', type=str, default='',
                         help='write results of model on test (or train if none is specified) data to specified filepath ')
     group.add_argument('--use-cached', action='store_true',
-                        help='reuse cached featurizations from a previous from last time')
+                        help='reuse cached featurizations from a previous run')
     group.add_argument('--drop-neurons', action='store_true',
                         help='drop top neurons instead of keeping them')
 
-    return data_config, data_parser, group, parser
+    return data_config, data_group, group, parser
 
 def add_run_classifier_args(parser):
     data_config, data_group = configure_data(parser)
+    # Set classification data option defaults
     data_group.set_defaults(split='1.', data=['data/binary_sst/train.csv'])
     data_group.set_defaults(shuffle=False)
+    # Create classification-specific options
     group = parser.add_argument_group('run_classifier', 'arguments used for run classifier script')
     group.add_argument('--save_probs', type=str,  default='clf_results.npy',
                         help='path to save numpy of predicted probabilities')
@@ -225,14 +246,16 @@ def add_run_classifier_args(parser):
 
 def add_finetune_classifier_args(parser):
     data_config, data_group = configure_data(parser)
+    # Set finetuning data option defaults
+    data_group.set_defaults(split='1.', data=['data/binary_sst/train.csv'])
+    data_group.set_defaults(valid=['data/binary_sst/val.csv'], test=['data/binary_sst/test.csv'])
+    data_group.set_defaults(shuffle=True)
+    # Create finetuning-specific options
+    parser.set_defaults(get_hidden=True)
     data_group.add_argument('--seq-length', type=int, default=256,
                              help="Maximum sequence length to process (for unsupervised rec)")
     data_group.add_argument('--lazy', action='store_true',
                              help='whether to lazy evaluate the data set')
-    data_group.set_defaults(split='1.', data=['data/binary_sst/train.csv'])
-    data_group.set_defaults(valid=['data/binary_sst/val.csv'], test=['data/binary_sst/test.csv'])
-    data_group.set_defaults(shuffle=True)
-    parser.set_defaults(get_hidden=True)
     group = parser.add_argument_group('finetune_classifier', 'arguments used for finetune script')
     group.add_argument('--use-logreg', action='store_true',
                         help='use scikitlearn logistic regression instead of finetuning whole classifier')
@@ -251,41 +274,41 @@ def add_finetune_classifier_args(parser):
     group.add_argument('--freeze-lm', action='store_true',
                         help='keep lanuage model froze -- don\'t backprop to Transformer/RNN')
     group.add_argument('--aux-lm-loss', action='store_true',
-                       help='whether to use language modeling objective as aux loss')
+                        help='whether to use language modeling objective as aux loss')
     group.add_argument('--aux-lm-loss-weight', type=float, default=1.0,
-                       help='LM model weight -- NOTE: default is 1.0 for back compatible. Way too high -- reasonable around 0.02')
+                        help='LM model weight -- NOTE: default is 1.0 for back compatible. Way too high -- reasonable around 0.02')
     group.add_argument('--aux-head-variance-loss-weight', type=float, default=0,
-                       help='Set above 0.0 to force heads to learn different final-layer embeddings. Reasonable value ~10.-100.')
-    group.add_argument('--class-single-threshold', action='store_true',
-                       help='Set true for single threshold per class (multiple heads). Why? Less overfit.')
+                        help='Set above 0.0 to force heads to learn different final-layer embeddings. Reasonable value ~10.-100.')
     group.add_argument('--use-class-multihead-average', action='store_true',
-                       help='Use average output for multihead per class -- not necessary to use with --class-single-threshold [just average the thresholds]')
-    group.add_argument('--save-test-preds', type=str, default='/home/adlr-sent.cosmos433/tmp_raul/finetune_results.txt',
-                       help='path to save finetune test results to')
+                        help='Use average output for multihead per class -- not necessary to use with --class-single-threshold [just average the thresholds]')
     group.add_argument('--thresh-test-preds', type=str, default=None,
-                       help='path to thresholds for test outputs')
-    group.add_argument('--double-thresh', action='store_true',
-                       help='whether to report all metrics at once')
-    group.add_argument('--metric', type=str, default='f1',
-                       help='what metric to measure performance (save best model) with [acc, f1, mcc, all]')
+                        help='path to thresholds for test outputs')
+    group.add_argument('--report-metric', type=str, default='f1', choices=['jacc', 'acc', 'f1', 'mcc', 'precision', 'recall', 'var', 'all'],
+                        help='what metric to report performance (save best model)')
     group.add_argument('--all-metrics', action='store_true',
-                       help='whether to report all metrics at once')
-    group.add_argument('--threshold-metric', type=str, default='jacc',
-                       help='which metric to use when choosing ideal thresholds?')
+                        help='Overloads report metrics and reports all metrics at once')
+    group.add_argument('--threshold-metric', type=str, default='f1', choices=['jacc', 'acc', 'f1', 'mcc', 'precision', 'recall', 'var', 'all'],
+                        help='which metric to use when choosing ideal thresholds?')
     group.add_argument('--micro', action='store_true',
-                       help='whether to use micro averaging for metrics')
+                        help='whether to use micro averaging for metrics')
     group.add_argument('--global-tweaks', type=int, default=0,
-                       help='HACK: Pass int (1000 for example) to tweak individual thresholds toward best global average [good for SemEval]. Will increase threshold on rare, hard to measure, categories.')
+                        help='HACK: Pass int (1000 for example) to tweak individual thresholds toward best global average [good for SemEval]. Will increase threshold on rare, hard to measure, categories.')
     group.add_argument('--save-finetune', action='store_true',
-                       help='save finetuned models at every epoch of finetuning')
-    group.add_argument('--model-version-name', type=str, default='test',
-                       help='space to version model name -- for saving')
-    group.add_argument('--automatic-thresholding', action='store_true')
-    group.add_argument('--report-no-thresholding', action='store_true')
-    group.add_argument('--dual-threshold', action='store_true')
-    group.add_argument('--decay-style', type=str, default=None, help='one of constant(None), linear, cosine, or exponential')
-    group.add_argument('--warmup-epochs', type=float, default=0.)
-    group.add_argument('--decay-epochs', type=float, default=-1, help='number of epochs to decay for. if -1 decays for all of training')
-    group.add_argument('--load-finetuned', action='store_true')
+                        help='save finetuned models at every epoch of finetuning')
+    group.add_argument('--model-version-name', type=str, default='classifier',
+                        help='space to version model name -- for saving')
+    group.add_argument('--automatic-thresholding', action='store_true',
+                        help='automatically select classification thresholds based on validation performance. \
+                            (test results are also reported using the thresholds)')
+    group.add_argument('--no-test-eval', action='store_true',
+                        help='Do not report test metrics, write test and val results to disk instead.')
+    group.add_argument('--decay-style', type=str, default=None, choices=['constant', 'linear', 'cosine', 'exponential'],
+                        help='Learning rate decay, one of constant(None), linear, cosine, or exponential')
+    group.add_argument('--warmup-epochs', type=float, default=0.,
+                        help='number of epochs to warm up learning rate over.')
+    group.add_argument('--decay-epochs', type=float, default=-1, 
+                        help='number of epochs to decay for. If -1 decays for all of training')
+    group.add_argument('--load-finetuned', action='store_true',
+                        help='load not just the language model but a previously finetuned full classifier checkpoint')
 
     return data_config, data_group, group, parser

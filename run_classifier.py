@@ -8,6 +8,7 @@ from tqdm import tqdm
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
+import torch.nn.functional as F
 
 import numpy as np
 import pandas as pd
@@ -61,6 +62,15 @@ def get_model(args):
                                       model_args.classifier_hidden_layers, model_args.classifier_dropout, model_args.all_layers, concat_pools, False, model_args)
     args.heads_per_class = model_args.heads_per_class
     args.use_softmax = model_args.use_softmax
+    try:
+        args.classes = list(model_args.classes)
+    except:
+        args.classes = [args.label_key]
+
+    try:
+        args.dual_thresh = model_args.dual_thresh and not model_args.joint_binary_train
+    except:
+        args.dual_thresh = False
 
     if args.cuda:
         model.cuda()
@@ -73,11 +83,11 @@ def get_model(args):
             model.load_state_dict(sd)
         except:
             # if state dict has weight normalized parameters apply and remove weight norm to model while loading sd
-            if hasattr(model.encoder, 'rnn'):
-                apply_weight_norm(model.encoder.rnn)
+            if hasattr(model.lm_encoder, 'rnn'):
+                apply_weight_norm(model.lm_encoder.rnn)
             else:
-                apply_weight_norm(model.encoder)
-            model.encoder.load_state_dict(sd)
+                apply_weight_norm(model.lm_encoder)
+            model.lm_encoder.load_state_dict(sd)
             remove_weight_norm(model)
 
     if args.neurons > 0:
@@ -88,11 +98,12 @@ def get_model(args):
 # uses similar function as transform from transfer.py
 def classify(model, text, args):
     # Make sure to set *both* parts of the model to .eval() mode. 
-    model.encoder.eval()
+    model.lm_encoder.eval()
     model.classifier.eval()
     # Initialize data, append results
-    vars = np.array([])
+    stds = np.array([])
     labels = np.array([])
+    label_probs = np.array([])
     first_label = True
     heads_per_class = args.heads_per_class
 
@@ -106,6 +117,9 @@ def classify(model, text, args):
         text = Variable(text).long()
         timesteps = Variable(timesteps).long()
         labels = Variable(labels).long()
+        if args.max_seq_len is not None:
+            text = text[:, :args.max_seq_len]
+            timesteps = torch.clamp(timesteps, max=args.max_seq_len)
         if args.cuda:
             text, timesteps, labels = text.cuda(), timesteps.cuda(), labels.cuda()
         return text, labels, timesteps-1
@@ -114,11 +128,11 @@ def classify(model, text, args):
         if args.model.lower() == 'transformer' or args.model.lower() == 'bert' or args.model.lower() == 'elmo':
             class_out, (lm_or_encoder_out, state) = model(text_batch, length_batch, args.get_hidden)
         else:
-            model.encoder.rnn.reset_hidden(args.batch_size)
+            model.lm_encoder.rnn.reset_hidden(args.batch_size)
             for _ in range(1 + args.num_hidden_warmup):
                 class_out, (lm_or_encoder_out, state) = model(text_batch, length_batch, args.get_hidden)
-        if args.use_softmax:
-            class_out = torch.max(class_out,-1)[1].view(-1,1)
+        if args.use_softmax and args.heads_per_class == 1:
+            class_out = F.softmax(class_out, -1)
         return class_out, (lm_or_encoder_out, state)
 
 
@@ -136,17 +150,22 @@ def classify(model, text, args):
             if first_label:
                 first_label = False
                 labels = []
+                label_probs = []
                 if heads_per_class > 1:
-                    vars = []
+                    stds = []
             # Save variances, and predictions
             # TODO: Handle multi-head [multiple classes out]
             if heads_per_class > 1:
-                prob_var = probs.view(probs.shape[0],-1,heads_per_class).contiguous().std(2)
-                vars.append(prob_var[:,:].data.cpu().numpy())
-                probs = probs.view(probs.shape[0],-1,heads_per_class).contiguous().mean(2)
-            labels.append(probs[:,:].data.cpu().numpy())
+                _, probs, std, preds = probs
+                stds.append(std.data.cpu().numpy())
+            else:
+                probs, preds = probs
+                if args.use_softmax:
+                    probs = F.softmax(probs, -1)
+            labels.append(preds.data.cpu().numpy())
+            label_probs.append(probs.data.cpu().numpy())
 
-            num_char = length_batch.sum().data[0]
+            num_char = length_batch.sum().item()
 
             end = time.time()
             elapsed_time = end - start
@@ -159,40 +178,71 @@ def classify(model, text, args):
 
     if not first_label:
         labels = (np.concatenate(labels)) #.flatten())
+        label_probs = (np.concatenate(label_probs)) #.flatten())
         if heads_per_class > 1:
-            vars = (np.concatenate(vars))
+            stds = (np.concatenate(stds))
         else:
-            vars = np.zeros_like(labels)
+            stds = np.zeros_like(labels)
     print('%0.3f seconds to transform %d examples' %
                   (time.time() - tstart, n))
-    return labels, vars
+    return labels, label_probs, stds
+
+def make_header(classes, heads_per_class=1, softmax=False, dual_thresh=False):
+    header = []
+    if softmax:
+        header.append('prediction')
+    for cls in classes:
+        if not softmax:
+            header.append(cls + ' pred')
+        header.append(cls + ' prob')
+        if heads_per_class > 1:
+            header.append(cls + ' std')
+    if dual_thresh:
+        header.append('neutral pred')
+        header.append('neutral prob')
+    return header
+
+def get_row(pred, prob, std, classes, heads_per_class=1, softmax=False, dual_thresh=False):
+    row = []
+    if softmax:
+        row.append(pred[0])
+    for i in range(len(classes)):
+        if not softmax:
+            row.append(pred[i])
+        row.append(prob[i])
+        if heads_per_class > 1:
+            row.append(std[i])
+    if dual_thresh:
+        row.append(pred[2])
+        row.append(prob[2])
+    return row 
+
+def get_writer(preds, probs, stds, classes, heads_per_class=1, softmax=False, dual_thresh=False):
+    header = make_header(classes, heads_per_class, softmax, dual_thresh)
+    yield header
+    for pred, prob, std in zip(preds, probs, stds):
+        yield get_row(pred, prob, std, classes, heads_per_class, softmax, dual_thresh)
 
 def main():
     (train_data, val_data, test_data), tokenizer, args = get_data_and_args()
     model = get_model(args)
 
-    print('got to classify')
-    ypred, yvar = classify(model, train_data, args)
+    ypred, yprob, ystd = classify(model, train_data, args)
 
     save_root = ''
     save_root = os.path.join(save_root, args.save_probs)
 
     print('saving predicted probabilities to '+save_root)
     np.save(save_root, ypred)
+    np.save(save_root+'.prob', yprob)
+    np.save(save_root+'.std', ystd)
 
     if args.write_results is None or args.write_results == '':
         exit()
 
-    #TODO: Handle multilabel/softmax properly
-    def get_writer(probs):
-        header = ['predicted proba'] if not args.use_softmax else ['predicted']
-        yield header
-        for prob in probs:
-            yield prob
-
     print('writing results to '+args.write_results)
-    writer = get_writer(ypred)
+    writer = get_writer(ypred, yprob, ystd, args.classes, args.heads_per_class, args.use_softmax, args.dual_thresh)
     train_data.dataset.write(writer, path=args.write_results)
 
-if __name__ =='__main__':
+if __name__ == '__main__':
     main()

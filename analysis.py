@@ -22,11 +22,7 @@ def _binary_threshold(preds, labels, metric, micro, global_tweaks=1000, debug=Fa
     info_dicts = []
     category_metrics = []
     # Compute threshold per class... *unless* multiple heads per class and one threshold required.
-    if heads_per_class > 1 and class_single_threshold:
-        num_categories = int(preds.shape[1] / heads_per_class)
-        #print('%d categoris for shape %d and heads_per_class %.2f' % (num_categories, preds.shape[1], heads_per_class))
-    else:
-        num_categories = preds.shape[1]
+    num_categories = labels.shape[1]
     for category in range(num_categories):
         category_best_threshold = category_best_metric = 0
         for threshold in np.linspace(0.005, 1, 200):

@@ -1,3 +1,11 @@
+###############################################################################
+# BSD 3-Clause License
+#
+# Copyright (c) 2018, NVIDIA CORPORATION. All rights reserved.
+#
+# Author & Contact: Raul Puri (raulp@nvidia.com)
+###############################################################################
+
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch
 import warnings
