@@ -76,6 +76,18 @@ def default_collate(batch, maxlen=None, process=False):
     raise TypeError(("batch must contain tensors, numbers, dicts or lists; found {}"
                         .format(type(batch[0]))))
 
+def pin_memory_batch(batch):
+    if isinstance(batch, torch.Tensor):
+        return batch.pin_memory()
+    elif isinstance(batch, string_classes):
+        return batch
+    elif isinstance(batch, collections.Mapping):
+        return {k: pin_memory_batch(sample) for k, sample in batch.items()}
+    elif isinstance(batch, collections.Sequence):
+        return [pin_memory_batch(sample) for sample in batch]
+    else:
+        return batch
+
 class DataLoader(data.DataLoader):
     """normal data loader except with options for distributed data batch sampling + wrap around"""
     def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None, batch_sampler=None,
@@ -178,21 +190,130 @@ class ShardLoader(object):
 
     def set_seq_len(self, seq_len):
         self.seq_len = seq_len
-        self.sampler.set_seq_len(seq_len)
+        self.batch_sampler.set_seq_len(seq_len)
 
     def set_samples_per_shard(self, samples_per_shard):
         self.samples_per_shard = samples_per_shard
-        self.sampler.set_samples_per_shard(samples_per_shard)
+        self.batch_sampler.set_samples_per_shard(samples_per_shard)
 
     def set_persist_state(self, persist_state):
         self.persist_state = persist_state
-        self.sampler.set_persist_state(persist_state)
+        self.batch_sampler.set_persist_state(persist_state)
 
     def __len__(self):
         return len(self.batch_sampler)/self.batch_size
 
     def __iter__(self):
-        while True:
-            batch = self.batch_sampler.get_batch()
-            batch = [b.get() for b in batch]
-            yield default_collate(batch)
+        return _ShardLoaderIter(self)
+
+class _ShardLoaderIter(object):
+    def __init__(self, shardloader):
+        self.shardloader = shardloader
+        self.num_workers = self.shardloader.num_workers
+        self.batch_sampler = self.shardloader.batch_sampler
+        self.collate_fn = self.shardloader.collate_fn
+        self.pin_memory = self.shardloader.pin_memory
+        self.batch_size = self.batch_sampler.batch_size
+        self.timeout = self.shardloader.timeout
+        if self.num_workers == 0:
+            self.queue_manager = (q for q in self.batch_sampler.manage_queues())
+        else:
+            self.queue_manager = _ShardLoaderManager(self.batch_sampler, self.num_workers, self.collate_fn, self.pin_memory, self.timeout)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.num_workers == 0:
+            return self.collate_fn(next(self.queue_manager))
+        else:
+            return next(self.queue_manager)
+
+MP_STATUS_CHECK_INTERVAL = 5.0
+
+class _ShardLoaderManager(object):
+    def __init__(self, batch_sampler, num_workers, collate_fn, pin_memory=False, timeout=False):
+        self.batch_sampler = batch_sampler
+        self.batch_size = self.batch_sampler.batch_size
+        self.num_workers = num_workers
+        self.queue_size = num_workers*2
+        self.collate_fn = collate_fn
+        self.pin_memory = pin_memory
+        self.timeout = timeout
+
+        self.data_queues = []
+        self.workers = []
+
+        indices_per_worker = self.batch_size // self.num_workers
+        all_indices = list(range(self.batch_size))
+        for i in range(num_workers):
+            data_queue = multiprocessing.Queue(self.queue_size)
+            self.data_queues.append(data_queue)
+            batch_indices = all_indices[indices_per_worker*i:indices_per_worker*(i+1)]
+            w = multiprocessing.Process(target=self.batch_sampler.manage_queues_multiproc,
+                                        args=(batch_indices, data_queue))
+            w.daemon = True
+            w.start()
+            self.workers.append(w)
+
+        self.output_queue = queue.Queue(self.queue_size)
+        cur_device = -1
+        if torch.cuda.is_available():
+            cur_device = torch.cuda.current_device()
+        self.output_thread = threading.Thread(target=_shardloader_pin_memory_loop,
+                                              args=(self.output_queue, self.data_queues,
+                                                    self.collate_fn, self.pin_memory,
+                                                    cur_device))
+        self.output_thread.daemon = True
+        self.output_thread.start()
+
+    def __iter__(self):
+        return self
+
+    def _get_batch(self):
+        # In the non-timeout case, worker exit is covered by SIGCHLD handler.
+        # But if `pin_memory=True`, we still need account for the possibility
+        # that `pin_memory_thread` dies.
+        if self.timeout > 0:
+            try:
+                return self.output_queue.get(timeout=self.timeout)
+            except queue.Empty:
+                raise RuntimeError('DataLoader timed out after {} seconds'.format(self.timeout))
+        elif self.pin_memory:
+            while self.output_thread.is_alive():
+                try:
+                    return self.output_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
+                except queue.Empty:
+                    continue
+            else:
+                # while condition is false, i.e., pin_memory_thread died.
+                raise RuntimeError('Pin memory thread exited unexpectedly')
+            # In this case, `self.data_queue` is a `queue.Queue`,. But we don't
+            # need to call `.task_done()` because we don't use `.join()`.
+        else:
+            return self.output_queue.get(block=True)
+
+    def __next__(self):
+        return self._get_batch()
+
+
+def _shardloader_pin_memory_loop(output_queue, data_queues, collate_fn, pin_memory=False, device_id=-1, timeout=0):
+    queue_results = [list() for _ in data_queues]
+    output_queue_len = output_queue.maxsize
+    if device_id >= 0:
+        torch.cuda.set_device(device_id)
+    while True:
+        for i, data_queue in enumerate(data_queues):
+            try:
+                res = data_queue.get_nowait()
+                queue_results[i].append(res)
+            except queue.Empty:
+                continue
+        if sum(len(q)>=1 for q in queue_results) >= len(data_queues):
+            batch = []
+            for q in queue_results:
+                batch.extend(q.pop(0))
+            batch = collate_fn(batch)
+            if pin_memory:
+                batch = pin_memory_batch(batch)
+            output_queue.put(batch, block=True)
