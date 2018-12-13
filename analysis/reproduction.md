@@ -55,7 +55,7 @@ We also establish other best practices that did not directly affect our results,
  * **FP32 loss reduction**: Any reduction/averaging of more than 65k terms will be met with a dynamic range problem, so we convert any loss scalars to float as a relatively inexpensive safety measure.
  * **FP32 normalization**: Any l2 norm greater than 256 will have a dynamic range problem while computing the norm. As such, one should exponentiate and accumulate values into FP32 before returning the final norm in FP16.
 
-Using these techniques we are able to achieve convergence numbers for mLSTM training in fp32 (SP) and fp16 (MP) that are comparable to [Radford et. al's results](https://arxiv.org/abs/1704.01444) as demonstrated below.
+Using these techniques we are able to achieve convergence numbers for mLSTM training in fp32 (SP) and fp16 (MP) that are comparable to [Radford et. al's results](https://arxiv.org/abs/1704.01444) as demonstrated below. To train a model with the same speed numbers reported in our (large batch training)[https://nv-adlr.github.io/publication/2018-large-batch-lm] work, please use an older version of our [repository](https://github.com/NVIDIA/sentiment-discovery/tree/7f5ab28918a6fc29318a30f557b9454f0f5cc26a#pretrained-models).
 
 ![fp16 convergence results](../figures/16vs32.png "Fp16 vs Fp32 convergence figure")
 

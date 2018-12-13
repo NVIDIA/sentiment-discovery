@@ -1,4 +1,6 @@
 import math
+import os
+import sys
 
 import torch
 from torch.utils import data
@@ -176,15 +178,12 @@ class RandomShardSampler(object):
             no value is supplied it uses numpy's default random state (not thread safe).
     """
 
-    def __init__(self, data_source, samples_per_shard, seq_len=-1, persist_state=0, random_state=None):
+    def __init__(self, data_source, samples_per_shard, seq_len=-1, persist_state=0):
         self.data_source = data_source
         self.source_size = len(data_source)
         self.samples_per_shard = samples_per_shard
         self.seq_len = seq_len
         self.persist_state = persist_state
-        self.random_state = random_state
-        if self.random_state is None:
-            self.random_state = np.random
 
     def set_seq_len(self, seq_len):
         self.seq_len = seq_len
@@ -195,19 +194,18 @@ class RandomShardSampler(object):
     def set_persist_state(self, persist_state):
         self.persist_state = persist_state
 
-    def get(self, samples_per_shard=None, random_state=None):
+    def get(self, random_state, samples_per_shard=None):
         """
         Uses either supplied random state or default random state to sample data from 
         the data source, create a datashard, and return it.
         """
         if samples_per_shard is None:
             samples_per_shard = self.samples_per_shard
-        if random_state is None:
-            random_state = self.random_state
         sample_ids = random_state.randint(self.source_size, size=samples_per_shard)
         samples = [self.data_source[i] for i in sample_ids]
         samples = [sample['text'] if isinstance(sample, dict) else sample for sample in samples]
         return data_shard(samples, self.seq_len, self.persist_state)
+
 
     def __len__(self):
         return self.source_size
@@ -231,7 +229,7 @@ class BatchShardSampler(object):
         self.shard_sampler = shard_sampler
         self.batch_size = batch_size
         self.drop_last = drop_last
-        self.batch = None
+        # self.batch = None
         self.random_batch = random_batch
         if self.random_batch is None:
             self.random_batch = [np.random.RandomState(seed) for seed in np.random.randint(batch_size*999, size=batch_size)]
@@ -239,10 +237,6 @@ class BatchShardSampler(object):
     def set_seq_len(self, seq_len):
         self.seq_len = seq_len
         self.shard_sampler.set_seq_len(seq_len)
-        if self.batch is not None:
-            for shard_queue in self.batch:
-                for shard in shard_queue:
-                    shard.set_seq_len(seq_len)
 
     def set_samples_per_shard(self, samples_per_shard):
         self.samples_per_shard = samples_per_shard
@@ -252,55 +246,32 @@ class BatchShardSampler(object):
         self.persist_state = persist_state
         self.shard_sampler.set_persist_state(persist_state)
 
-    def batch_zero(self):
-        self.batch = []
-        for b in range(self.batch_size):
-            self.batch.append([self.get_shard(b)])
-
     def get_shard(self, b):
         return self.shard_sampler.get(random_state=self.random_batch[b])
 
-    def is_batch_ready(self):
-        for shard_queue in self.batch:
-            if shard_queue[-1].is_done():
-                return False
-        return True
+    def iter_queue(self, b):
+        live_shard = self.get_shard(b)
+        while True:
+            if live_shard.is_done():
+                live_shard = self.get_shard(b)
+            yield live_shard.get()
 
-    def update_batch(self):
-        for b, shard_queue in enumerate(self.batch):
-            if not shard_queue[-1].is_done():
-                continue
-            shard_queue
+    def manage_queues(self):
+        queues = [self.iter_queue(b) for b in range(self.batch_size)]
+        while True:
+            yield [next(q) for q in queues]
 
-    def check_shard_queue(self, b):
-        shard_queue = self.batch[b]
-        queue_len = len(shard_queue)
-        i = 0
-        while i < queue_len:
-            if shard_queue[i].is_done():
-                shard_queue.pop(i)
-                i -= 1
-                queue_len -=1
+    def manage_queues_multiproc(self, queue_indices=None, output_queue=None):
+        assert output_queue is not None
+        if queue_indices is None:
+            queue_indices = list(range(self.batch_size))
+        queues = [self.iter_queue(b) for b in queue_indices]
 
-            elif shard_queue[i].is_last():
-                shard_queue.append(self.get_shard(b))
-                queue_len += 1
-            i += 1
-        return shard_queue
-
-    def check_and_prep_batch(self):
-        for b in range(self.batch_size):
-            self.check_shard_queue(b)
-
-    def get_batch(self):
-        if self.batch is None:
-            self.batch_zero()
-        self.check_and_prep_batch()
-        return [shard_queue[0] for shard_queue in self.batch]
+        while True:
+            output_queue.put([next(q) for q in queues], block=True)
 
     def __iter__(self):
-        while True:
-            yield self.get_batch()
+        return self.manage_queues()
 
     def __len__(self):
         if self.drop_last:

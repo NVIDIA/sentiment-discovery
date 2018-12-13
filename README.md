@@ -136,7 +136,7 @@ bash ./experiments/train_transformer_singlenode.sh                              
 
 For more documentation of our language modeling functionality look [here](./script_docs/arguments.md#unsupervised-lm-arguments)
 
-In order to learn about our language modeling experiments and reproduce reulst see the [training reproduction](./analysis/reproduction.md#training-set-up) section in analysis.
+In order to learn about our language modeling experiments and reproduce results see the [training reproduction](./analysis/reproduction.md#training-set-up) section in analysis.
 
 For information about how we achieve numerical stability with FP16 training see our [fp16 training](./analysis/reproduction.md#fp16-training) analysis.
 
@@ -177,7 +177,7 @@ python3 finetune_classifier.py --tokenizer-type SentencePieceTokenizer --vocab-s
 python3 finetune_classifier.py --automatic-thresholding --non-binary-cols l1 l2 l3 --lr 2e-5\     #finetune multilayer classifier with 3 classes and 4 heads per class on some custom dataset and automatically select classfication thresholds
   --classifier-hidden-layers 2048 1024 3 --heads-per-class 4 --aux-head-variance-loss-weight 1.   #`aux-head-variance-loss-weight` is an auxiliary loss to increase the variance between each of the 4 head's weights
   --data <custom_train>.csv --val <custom_val>.csv --test <custom_test>.csv --load mlstm.pt
-bash ./experiments/se_transformer_multihead.sh                                                    #finetune a multihead transformer on 8 semeval categories                                                                
+bash ./experiments/se_transformer_multihead.sh                                                    #finetune a multihead transformer on 8 semeval categories
 ```
 
 See how to reproduce our finetuning experiments in the [finetuning reproduction](./analysis/reproduction.md#finetuning-classifiers) section of analysis.

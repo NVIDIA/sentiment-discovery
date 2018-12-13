@@ -292,7 +292,7 @@ def main():
     torch.backends.cudnn.enabled = False
     args.cuda = torch.cuda.is_available()
 
-    if args.multinode_init or args.world_size <= 1:
+    if args.multinode_init:
         args.rank = int(os.getenv('RANK', 0))
         args.world_size = int(os.getenv("WORLD_SIZE", 1))
 

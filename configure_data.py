@@ -34,8 +34,9 @@ def make_loaders(opt):
     eval_seq_length = opt.eval_seq_length
     if opt.eval_seq_length < 0:
         eval_seq_length = eval_seq_length * opt.world_size
-    data_loader_args = {'num_workers': 0, 'shuffle': opt.shuffle, 'batch_size': batch_size,
-    #data_loader_args = {'num_workers': 1, 'shuffle': opt.shuffle, 'batch_size': batch_size,
+    # data_loader_args = {'num_workers': 0, 'shuffle': opt.shuffle, 'batch_size': batch_size,
+    data_loader_args = {'num_workers': 4, 'shuffle': opt.shuffle, 'batch_size': batch_size,
+    # data_loader_args = {'num_workers': 1, 'shuffle': opt.shuffle, 'batch_size': batch_size,
                     'pin_memory': True, 'transpose': opt.transpose, 'distributed': opt.world_size > 1,
                     'rank': opt.rank, 'world_size': opt.world_size, 'drop_last': opt.world_size > 1}
     if opt.data_set_type == 'L2R':
@@ -174,6 +175,6 @@ def configure_data(parser):
                 'data_set_type': 'supervised',
                 'seq_length': 256,
                 'eval_seq_length': 256,
-                'samples_per_shard': 1000
+                'samples_per_shard': 100
                }
     return DataConfig(main_parser, defaults=defaults), group
