@@ -3,7 +3,7 @@ This codebase contains code to reproduce results from our series of large scale 
 
 This codebase supports mixed precision training as well as distributed, multi-gpu, multi-node training for language models (support is provided based on the NVIDIA [APEx](https://github.com/NVIDIA/apex) project). In addition to training language models, this codebase can be used to easily transfer and finetune trained models on custom text classification datasets.
 
-For example, a [Transformer](https://arxiv.org/abs/1706.03762) language model for unsupervised modeling of large text datasets, such as the [amazon-review dataset](http://jmcauley.ucsd.edu/data/amazon/), is implemented in PyTorch. We also support other tokenization methods, such as character or sentencepiec tokenization, and language models using various recurrent architectures.
+For example, a [Transformer](https://arxiv.org/abs/1706.03762) language model for unsupervised modeling of large text datasets, such as the [amazon-review dataset](http://jmcauley.ucsd.edu/data/amazon/), is implemented in PyTorch. We also support other tokenization methods, such as character or sentencepiece tokenization, and language models using various recurrent architectures.
 
 The learned language model can be transferred to other natural language processing (NLP) tasks where it is used to featurize text samples. The featurizations provide a strong initialization point for discriminative language tasks, and allow for competitive task performance given only a few labeled samples. We illustrate this below and show the model transferred to the [Binary Stanford Sentiment Treebank task](https://nlp.stanford.edu/sentiment/treebank.html).
 
