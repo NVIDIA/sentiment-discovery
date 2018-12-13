@@ -7,6 +7,8 @@ For our data parallel implementation we utilize a DistributedDataParallel model 
 
 We find that with this system setup we are able to achieve relatively linear speedup relative to the number of available GPUs. Infiniband interconnects allow for greater throughput scaling with multiple nodes than ethernet allows for. Additionally, we find that throughput scaling with Infiniband is better with larger models (8k mLSTM model) since the increased communication overhead is less than the increase in compute intensity for these larger mLSTM models. We expect that this trend would continue similarly to other models.
 
+To reproduce these results precisely, please use an older version of our [repository](https://github.com/NVIDIA/sentiment-discovery/tree/7f5ab28918a6fc29318a30f557b9454f0f5cc26a#pretrained-models)
+
 ## PyTorch + GIL
 In order to ensure thread-safe execution the python threads compete for a global lock needed to interpret python commands. This is problematic for running multiple processes within a single python processes (such as data loading process+multiple parralel computational graph executions), and can negatively impact the performance of data parallel training implementations. To circumvent this we utilize a distributed data parallel training paradigm with 1 python process per gpu so that each computational unit has full access to the python interpreter.
 
