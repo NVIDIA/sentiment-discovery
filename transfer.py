@@ -15,8 +15,6 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 import numpy as np
-# from sklearn.linear_model import LogisticRegression
-# from sklearn.metrics import matthews_corrcoef
 from logreg_utils import train_logreg
 
 from fp16 import FP16_Module, FP16_Optimizer
