@@ -1,29 +1,9 @@
 # Reproducing Results
 This repo started by trying to reproduce results from OpenAI's [Learning to Generate Reviews and Discovering Sentiment](https://arxiv.org/abs/1704.01444) work, and it has since evolved to include more complex language models, methods of tokenization, and classification problems. 
 
-Our original reproduction achieved comparable results in both unsupervised reconstruction and sentiment transfer. This is denoted by solid lines for our model and dashed lines for OpenAI's model. We used weights sourced from OpenAI to manually verify performance on our instance of the data.
-
-![reproduction results graph](../figures/reproduction_graph.png "Reproduction metrics")
 
 ## Training 
-Contrary to results in the OpenAI work the validation reconstruction loss is lower than the training loss. However, we found that the downstream classification performance was comparable so we consider our implementation to be of satisfactory performance and relatively equivalent.
-
-### mLSTM Training Set Up
-It took several cycles of trial and error to come up with a result comparable to the original. Some things were not entirely apparent from the paper, key model details were often hidden in one line, and took several tries to get right. Other minutia were found out independently. We've included what we found to work well.
- * **Model**: 4096-d mLSTM, 64-d embedding, 256-d output. (we also trained a similarly parameterized lstm)
- * **Weight Norm**: Applied only to lstm parameters (hidden->hidden/gate weights), not embedding or output. 
- * **Optimizer**: Adam
- * **Learning Rate**: 5e-4 per batch of 128. Linear Learning rate decay to 0 over course of epoch.
- * **Gradient Clipping**: We occassionally ran into problems with destabilizing gradient explosions. Therfore, we clipped our gradients to a maximum of `1.`.
- * **Data set**: Aggressively Deduplicated Amazon Review dataset with 1000/1/1 train/test/validation shards. Each of the three sets are internally shuffled. Samples in a shard are concatenated together so as to persist state across gradient updates.
-   * **Tokenization**: Character level tokenization was used. Including padding tokens this resulted in a vocabulary size of 257
-   * **Sequence Length**: Sequences of 256 tokens were used
- * **State Persistence**: The hidden state is persisted across all samples and reset at the start of a shard.
- * **Batch per gpu**: 128 (instead of OpenAI's 32) with FP32 training and 256 with FP16 training.
- * **Hardware**: 8 volta-class gpus
- * **Learning Rate Scaling**: We took queues from recent work in training imagenet at scale and leveraged [FAIR's (Goyal et. al 2017)](https://arxiv.org/pdf/1706.02677.pdf) linear scaling rule.  However, after sufficient experimentation we found that learning rate scaling did not work well at all batch sizes and we capped our max learning rate at 3e-3. We also found that using a linear decay rate over 100k steps for global batch sizes greater than 2048 worked well in our case.
- * **Training Time**: With FP16 training it takes approximately 17 hours to train.
- * **Training command**: To run this training experiment run `./experiments/train_mlstm_singlenode.sh`.
+We provide utilities to train both recurrent as well as transformer-based language models. 
 
 ### Transformer Training Set Up
 The transformer model has demonstrated its capabilities in recent work as a state of the art language model for natural language understanding. We similarly leveraged the transformer in our work on [Practical Text Classification With Large Pre-Trained Language Models](https://arxiv.org/abs/1812.01207). The transformer we used was pre trained as follows.
@@ -40,6 +20,26 @@ The transformer model has demonstrated its capabilities in recent work as a stat
  * **Training time**: With FP16 training it takes approximately 3 days to train.
  * **Training command**: To run this training experiment run `./experiments/train_transformer_singlenode.sh`.
 
+### mLSTM Training Set Up
+It took several cycles of trial and error to come up with a result comparable to the original mLSTM from OpenAI. Some things were not entirely apparent from the paper, key model details were often hidden in one line, and took several tries to get right. Other minutia were found out independently. We've included what we found to work well.
+ * **Model**: 4096-d mLSTM, 64-d embedding, 256-d output. (we also trained a similarly parameterized lstm)
+ * **Weight Norm**: Applied only to lstm parameters (hidden->hidden/gate weights), not embedding or output. 
+ * **Optimizer**: Adam
+ * **Learning Rate**: 5e-4 per batch of 128. Linear Learning rate decay to 0 over course of epoch.
+ * **Gradient Clipping**: We occassionally ran into problems with destabilizing gradient explosions. Therfore, we clipped our gradients to a maximum of `1.`.
+ * **Data set**: Aggressively Deduplicated Amazon Review dataset with 1000/1/1 train/test/validation shards. Each of the three sets are internally shuffled. Samples in a shard are concatenated together so as to persist state across gradient updates.
+   * **Tokenization**: Character level tokenization was used. Including padding tokens this resulted in a vocabulary size of 257
+   * **Sequence Length**: Sequences of 256 tokens were used
+ * **State Persistence**: The hidden state is persisted across all samples and reset at the start of a shard.
+ * **Batch per gpu**: 128 (instead of OpenAI's 32) with FP32 training and 256 with FP16 training.
+ * **Hardware**: 8 volta-class gpus
+ * **Learning Rate Scaling**: We took queues from recent work in training imagenet at scale and leveraged [FAIR's (Goyal et. al 2017)](https://arxiv.org/pdf/1706.02677.pdf) linear scaling rule.  However, after sufficient experimentation we found that learning rate scaling did not work well at all batch sizes and we capped our max learning rate at 3e-3. We also found that using a linear decay rate over 100k steps for global batch sizes greater than 2048 worked well in our case.
+ * **Training Time**: With FP16 training it takes approximately 17 hours to train.
+ * **Training command**: To run this training experiment run `./experiments/train_mlstm_singlenode.sh`.
+
+Our original reproduction achieved comparable results in both unsupervised reconstruction and sentiment transfer. This is denoted by solid lines for our model and dashed lines for OpenAI's model. We used weights sourced from OpenAI to manually verify performance on our instance of the data.
+
+![reproduction results graph](../figures/reproduction_graph.png "Reproduction metrics")
 
 ## FP16 Training
 Training our models with FP16 arithmetic has proven to be critical for improving turnaround time of our own experiments and the speed of ideation. In addition to faster computation, with FP16 training we're also able to utilize a batch size that is at least 2x larger compared to FP32 training with no significant computation slowdown. This allows for an additional 2x speedup in training on top of the faster arithmetic.
@@ -64,7 +64,7 @@ We also analyzed the effect of various mLSTM model sizes on performance.
 
 We utilize FP16's increased speed and reduced memory footprint to train a model with a hidden state size of 8k.
 
-This allows us to further improve on the State of The Art BPC on Amazon Review language modeling and sentiment classification.
+This allows us to further improve on the State of The Art BPC on Amazon Review language modeling set by [Gray et. al](https://blog.openai.com/block-sparse-gpu-kernels/).
 
 ![SOTA Language Modeling](../figures/size_comparison.png) 
 
@@ -82,10 +82,6 @@ To run this type of transfer learning use:
 bash ./experiments/run_sk_sst.sh                                    #run transfer learning with mlstm on imdb dataset
 bash ./experiments/run_sk_imdb.sh                                   #run transfer learning with mlstm on sst dataset
 ```
-
-**It should be noted that SOTA performance uses [Gray et. al's](https://blog.openai.com/block-sparse-gpu-kernels/) follow up work for comparison**
-
-![SOTA Sentiment Performance](../figures/sentiment_performance.png)
 
 ## Finetuning Classifiers
 Not only can we transfer models to downstream classification tasks, but we can also perform end to end finetuning of models on difficult downstream text classification tasks. In our latest [work](https://arxiv.org/abs/1812.01207) we finetune Transformer and mLSTM language models on the [SemEval 2018 1 E-c tweet emotion classification challenge](https://competitions.codalab.org/competitions/17751). 
