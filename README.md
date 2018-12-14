@@ -1,15 +1,23 @@
 # PyTorch Unsupervised Sentiment Discovery
-This codebase contains code to reproduce results from our series of large scale pretraining + transfer NLP papers: _[Large Scale Language Modeling: Converging on 40GB of Text in Four Hours](https://nv-adlr.github.io/publication/2018-large-batch-lm)_ and _[Practical Text Classification With Large Pre-Trained Language Models](https://arxiv.org/abs/1812.01207)_. This effort was born out of a desire to reproduce, analyze, and scale the [Generating Reviews and Discovering Sentiment](https://github.com/openai/generating-reviews-discovering-sentiment) paper from OpenAI.
+This codebase contains pretrained binary sentiment and multimodel emotion classification models as well as code to reproduce results from our series of large scale pretraining + transfer NLP papers: _[Large Scale Language Modeling: Converging on 40GB of Text in Four Hours](https://nv-adlr.github.io/publication/2018-large-batch-lm)_ and _[Practical Text Classification With Large Pre-Trained Language Models](https://arxiv.org/abs/1812.01207)_. This effort was born out of a desire to reproduce, analyze, and scale the [Generating Reviews and Discovering Sentiment](https://github.com/openai/generating-reviews-discovering-sentiment) paper from OpenAI.
+
+The techniques used in this repository are general purpose and our easy to use command line interface can be used to train state of the art classification models on your own difficult classification datasets.
 
 This codebase supports mixed precision training as well as distributed, multi-gpu, multi-node training for language models (support is provided based on the NVIDIA [APEx](https://github.com/NVIDIA/apex) project). In addition to training language models, this codebase can be used to easily transfer and finetune trained models on custom text classification datasets.
 
-For example, a [Transformer](https://arxiv.org/abs/1706.03762) language model for unsupervised modeling of large text datasets, such as the [amazon-review dataset](http://jmcauley.ucsd.edu/data/amazon/), is implemented in PyTorch. We also support other tokenization methods, such as character or sentencepiec tokenization, and language models using various recurrent architectures.
+For example, a [Transformer](https://arxiv.org/abs/1706.03762) language model for unsupervised modeling of large text datasets, such as the [amazon-review dataset](http://jmcauley.ucsd.edu/data/amazon/), is implemented in PyTorch. We also support other tokenization methods, such as character or sentencepiece tokenization, and language models using various recurrent architectures.
 
-The learned language model can be transferred to other natural language processing (NLP) tasks where it is used to featurize text samples. The featurizations provide a strong initialization point for discriminative language tasks, and allow for competitive task performance given only a few labeled samples. We illustrate this below and show the model transferred to the [Binary Stanford Sentiment Treebank task](https://nlp.stanford.edu/sentiment/treebank.html).
+The learned language model can be transferred to other natural language processing (NLP) tasks where it is used to featurize text samples. The featurizations provide a strong initialization point for discriminative language tasks, and allow for competitive task performance given only a few labeled samples. For example, we consider finetuning our models on the difficult task of multimodal emotion classification based on a subset of the plutchik wheel of emotions.
 
-![main performance fig](./figures/reproduction_graph.png "Reconstruction and Transfer performance")
+![plutchik fig](./figures/plutchik-wheel.png "Plutchik Wheel of Emotions")
 
-The model's performance as a whole will increase as it processes more data.
+Created by [Robert Plutchik](https://en.wikipedia.org/wiki/Robert_Plutchik#Plutchik's_wheel_of_emotions), this wheel is used to illustrate different emotions in a compelling and nuanced way. He suggested that there are 8 primary bipolar emotions (joy versus sadness, anger versus fear, trust versus disgust, and surprise versus anticipation) with different levels of emotional intensity. For our classification task we utilize tweets from the [SemEval2018 Task 1E-c emotion classification dataset](https://competitions.codalab.org/competitions/17751) to perform multilabel classification of anger, anticipation, disgust, fear, joy, sadness, surprise, and trust. This is a difficult task that suffers from real world classification problems such as class imbalance and labeler disagreement. 
+
+![semeval results](./figures/semeval_results.PNG "SemEval Plutchik results")
+
+On the full SemEval emotion classification dataset we find that finetuning our model on the data achieves competitive state of the art performance with no additional domain-specific feature engineering.
+
+![semeval leaderboard](./figures/semeval_leaderboard.png "SemEval leaderboard")
 
 ## ReadMe Contents
  * [Setup](#setup)
@@ -35,8 +43,8 @@ The model's performance as a whole will increase as it processes more data.
       * [Model/Optimization Robustness](./analysis/unsupervised.md#modeloptimization-robustness)
   * [Reproducing Results](./analysis/reproduction.md)
      * [Training](./analysis/reproduction.md#training)
-        * [mLSTM Training Setup](./analysis/reproduction.md#mlstm-training-set-up)
         * [Transformer Training Setup](./analysis/reproduction.md#transformer-training-set-up)
+        * [mLSTM Training Setup](./analysis/reproduction.md#mlstm-training-set-up)
      * [FP16 Training](./analysis/reproduction.md#fp16-training)
      * [Large Model Training](./analysis/reproduction.md#going-bigger-with-large-models)
      * [Sentiment Transfer](./analysis/reproduction.md#transfer)
@@ -72,14 +80,14 @@ We've included a transformer language model base as well as a 4096-d mlstm langu
  * [FP16 Transformer LM](https://drive.google.com/file/d/1rQfJkHsVJEI2WgvoHzx5Ooxm0CWSjdYt/view?usp=sharing) [311MB]
  * [FP16 mLSTM LM](https://drive.google.com/file/d/1EEZCZ_AZX_MlAsV-2GlFqxTT-KaNT3rG/view?usp=sharing) [169MB]
 
-We've also included already trained classification models for SST and IMDB binary sentiment classification:
- * [SST Transformer](https://drive.google.com/file/d/1-lxjFuJm_fQ_DvnxU74-35T_M8WjvrQH/view?usp=sharing) [621MB]
- * [SST mLSTM](https://drive.google.com/file/d/142dVGcHePvOMSojVYiRxutbYSeLu_9ym/view?usp=sharing) [325MB]
- * [IMDB mLSTM](https://drive.google.com/open?id=1efsCIWQPsXwmqORZ-qs-JdtxiPOssAss) [325MB]
+We've also included classifiers trained on a subset of SemEval emotions corresponding to the 8 plutchik emotions (anger, anticipation, disgust, fear, joy, sadness, surprise, and trust): 
+ * [Finetuned Plutchik Transformer](https://drive.google.com/file/d/1rC6LWGNkHaZkuojCEWDqSKcDGwFMBTYZ/view?usp=sharing) [673MN]
+ * [Finetuned Plutchik mLSTM](https://drive.google.com/file/d/1ieiWFrYBqzBgGPc3R36x9oL7vlj3lt2F/view?usp=sharing) [433MB]
 
-and classifiers trained on a subset of SemEval emotions corresponding to the 8 plutchik emotions (anger, anticipation, disgust, fear, joy, sadness, surprise, and trust): 
- * [Transformer](https://drive.google.com/file/d/1rC6LWGNkHaZkuojCEWDqSKcDGwFMBTYZ/view?usp=sharing) [673MN]
- * [mLSTM](https://drive.google.com/file/d/1ieiWFrYBqzBgGPc3R36x9oL7vlj3lt2F/view?usp=sharing) [433MB]
+Lastly, we've also included already trained classification models for SST and IMDB binary sentiment classification:
+ * [Finetuned SST Transformer](https://drive.google.com/file/d/1-lxjFuJm_fQ_DvnxU74-35T_M8WjvrQH/view?usp=sharing) [621MB]
+ * [Transferred SST mLSTM](https://drive.google.com/file/d/142dVGcHePvOMSojVYiRxutbYSeLu_9ym/view?usp=sharing) [325MB]
+ * [Transferred IMDB mLSTM](https://drive.google.com/open?id=1efsCIWQPsXwmqORZ-qs-JdtxiPOssAss) [325MB]
 
 To use classification models that reproduce results from our original large batch language modeling paper please use the following [commit hash and set of models](https://github.com/NVIDIA/sentiment-discovery/tree/7f5ab28918a6fc29318a30f557b9454f0f5cc26a#pretrained-models).
 
@@ -113,7 +121,7 @@ python3 run_classifier.py --load_model ama_sst.pt --text-key <text-column> --dat
 See [here](./script_docs/arguments.md#running-a-classifier-arguments) for more documentation.
 
 ### Training Language Models (+ Distributed/FP16 Training)
-Train a recurrent language model on a csv/json corpus. By default we train a weight-normalized, 4096-d mLSTM, with a 64-d character embedding.
+Train a language model on a csv/json corpus. By default we train a weight-normalized, 4096-d mLSTM, with a 64-d character embedding.
 This is the first step of a 2-step process to training your own sentiment classifier.
 Saves model to `lang_model.pt` by default.
 
@@ -154,10 +162,6 @@ bash ./experiments/run_sk_sst.sh                                    #run transfe
 bash ./experiments/run_sk_imdb.sh                                   #run transfer learning with mlstm on sst dataset
 ```
 
-Expected test accuracy for transfering fully trained mLSTM models to sentiment classification for a given mLSTM hidden size:
-
-![Sentiment Transfer Performance](./figures/sentiment_performance.png)
-
 Additional documentation of the command line arguments available for transfer can be found [here](./script_docs/arguments.md#sentiment-transfer-arguments)
  
 ### Classifier Finetuning
@@ -191,8 +195,8 @@ Additional documentation of the command line arguments available for `finetune_c
    * [Model/Optimization Robustness](./analysis/unsupervised.md#modeloptimization-robustness)
  * [Reproducing Results](./analysis/reproduction.md)
    * [Training](./analysis/reproduction.md#training)
-     * [mLSTM Training Setup](./analysis/reproduction.md#mlstm-training-set-up)
      * [Transformer Training Setup](./analysis/reproduction.md#transformer-training-set-up)
+     * [mLSTM Training Setup](./analysis/reproduction.md#mlstm-training-set-up)
    * [FP16 Training](./analysis/reproduction.md#fp16-training) 
    * [Large Model Training](./analysis/reproduction.md#going-bigger-with-large-models)
    * [Sentiment Transfer](./analysis/reproduction.md#transfer)

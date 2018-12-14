@@ -12,13 +12,8 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-
 import numpy as np
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import matthews_corrcoef
+from logreg_utils import train_logreg
 
 from fp16 import FP16_Module, FP16_Optimizer
 from apex.reparameterization import apply_weight_norm, remove_weight_norm
@@ -190,132 +185,6 @@ def transform(model, text_batch, labels_batch, length_batch, args, LR=None):
 
     # class_out = class_out.float().view(-1, model.out_dim)
     return class_out, lm_or_encoder_out
-
-def train_logreg(args, trX, trY, vaX=None, vaY=None, teX=None, teY=None, penalty='l1', max_iter=100,
-        C=2**np.arange(-8, 1).astype(np.float), seed=42, model=None, eval_test=True, neurons=None, drop_neurons=False):
-    """
-    slightly modified version of openai implementation https://github.com/openai/generating-reviews-discovering-sentiment/blob/master/utils.py
-    if model is not None it doesn't train the model before scoring, it just scores the model
-    """
-    # if only integer is provided for C make it iterable so we can loop over
-    if not isinstance(C, collections.Iterable):
-        C = list([C])
-    # Cross validation over C
-    n_classes = 1
-    if len(trY.shape)>1:
-        n_classes = trY.shape[-1]
-    scores = []
-    if model is None:
-        for i, c in enumerate(C):
-            if n_classes <= 1:
-                model = LogisticRegression(C=c, penalty=penalty, max_iter=max_iter, random_state=seed)
-                model.fit(trX, trY)
-                blank_info_dict = {'fp' : 0, 'tp' : 0, 'fn' : 0, 'tn' : 0, 'std' : 0.,
-                                   'metric' : args.threshold_metric, 'micro' : args.micro}
-                if vaX is not None:
-                    info_dict = update_info_dict(blank_info_dict.copy(), vaY, model.predict_proba(vaX)[:, -1])
-                else:
-                    info_dict = update_info_dict(blank_info_dict.copy(), trY, model.predict_proba(trX)[:, -1])
-                scores.append(get_metric(info_dict))
-                print(scores[-1])
-                del model
-            else:
-                info_dicts = []
-                model = []
-                for cls in range(n_classes):
-                    _model = LogisticRegression(C=c, penalty=penalty, max_iter=max_iter, random_state=seed)
-                    _model.fit(trX, trY[:, cls])
-                    blank_info_dict = {'fp' : 0, 'tp' : 0, 'fn' : 0, 'tn' : 0, 'std' : 0.,
-                                       'metric' : args.threshold_metric, 'micro' : args.micro}
-                    if vaX is not None:
-                        info_dict = update_info_dict(blank_info_dict.copy(), vaY[:, cls], _model.predict_proba(vaX)[:, -1])
-                    else:
-                        info_dict = update_info_dict(blank_info_dict.copy(), trY[:, cls], _model.predict_proba(trX)[:, -1])
-                    info_dicts.append(info_dict)
-                    model.append(_model)
-                scores.append(get_metric(info_dicts))
-                print(scores[-1])
-                del model
-        c = C[np.argmax(scores)]
-        if n_classes <= 1:
-            model = LogisticRegression(C=c, penalty=penalty, max_iter=max_iter, random_state=seed)
-            model.fit(trX, trY)
-        else:
-            model = []
-            for cls in range(n_classes):
-                _model = LogisticRegression(C=c, penalty=penalty, max_iter=max_iter, random_state=seed)
-                _model.fit(trX, trY[:, cls])
-                model.append(_model)
-    else:
-        c = model.C
-    # predict probabilities and get accuracy of regression model on train, val, test as appropriate
-    # also get number of regression weights that are not zero. (number of features used for modeling)
-    scores = []
-    if n_classes == 1:
-        nnotzero = np.sum(model.coef_ != 0)
-        preds = model.predict_proba(trX)[:, -1]
-        train_score = get_metric(update_info_dict(blank_info_dict.copy(), trY, preds), args.report_metric)
-    else:
-        nnotzero = 0
-        preds = []
-        info_dicts = []
-        for cls in range(n_classes):
-            nnotzero += np.sum(model[cls].coef_ != 0)
-            _preds = model[cls].predict_proba(trX)[:, -1]
-            info_dicts.append(update_info_dict(blank_info_dict.copy(), trY[:, cls], _preds))
-            preds.append(_preds)
-        nnotzero/=n_classes
-        train_score = get_metric(info_dicts, args.report_metric)
-        preds = np.concatenate([p.reshape((-1, 1)) for p in preds], axis=1)
-    scores.append(train_score * 100)
-    if vaX is None:
-        eval_data = trX
-        eval_labels = trY
-        val_score = train_score
-    else:
-        eval_data = vaX
-        eval_labels = vaY
-        if n_classes == 1:
-            preds = model.predict_proba(vaX)[:, -1]
-            val_score = get_metric(update_info_dict(blank_info_dict.copy(), vaY, preds), args.report_metric)
-        else:
-            preds = []
-            info_dicts = []
-            for cls in range(n_classes):
-                _preds = model[cls].predict_proba(vaX)[:, -1]
-                info_dicts.append(update_info_dict(blank_info_dict.copy(), vaY[:, cls], _preds))
-                preds.append(_preds)
-            val_score = get_metric(info_dicts, args.report_metric)
-            preds = np.concatenate([p.reshape((-1, 1)) for p in preds], axis=1)
-    val_preds = preds
-    val_labels = eval_labels
-    scores.append(val_score * 100)
-    eval_score = val_score
-    threshold = .5
-    if args.automatic_thresholding:
-        _, threshold, _, _ = _binary_threshold(preds.reshape(-1,1), eval_labels.reshape(-1,1), args.threshold_metric, args.micro)
-        threshold = float(threshold.squeeze())
-    if teX is not None and teY is not None and eval_test:
-        eval_data = teX
-        eval_labels = teY
-        if n_classes == 1:
-            preds = model.predict_proba(eval_data)[:, -1]
-        else:
-            preds = []
-            for cls in range(n_classes):
-                _preds = model[cls].predict_proba(eval_data)[:, -1]
-                preds.append(_preds)
-            preds = np.concatenate([p.reshape((-1, 1)) for p in preds], axis=1)
-    if n_classes == 1:
-        eval_score = get_metric(update_info_dict(blank_info_dict.copy(), eval_labels, preds, threshold=threshold), args.report_metric)
-    else:
-        info_dicts = []
-        for cls in range(n_classes):
-            info_dicts.append(update_info_dict(blank_info_dict.copy(), eval_labels[:, cls], preds[:, cls]))
-        eval_score = get_metric(info_dicts, args.report_metric)
-
-    scores.append(eval_score * 100)
-    return model, scores, c, nnotzero
 
 def finetune(model, text, args, val_data=None, LR=None, reg_loss=None, tqdm_desc='nvidia', save_outputs=False,
     heads_per_class=1, default_threshold=0.5, last_thresholds=[], threshold_validation=True, debug=False):
@@ -600,7 +469,9 @@ def main():
         vaX, vaY = transform_for_logreg(model, val_data, args, desc='val')
         teX, teY = transform_for_logreg(model, test_data, args, desc='test')
 
-        logreg_model, logreg_scores, c, nnotzero = train_logreg(args, trX, trY, vaX, vaY, teX, teY, eval_test=not args.no_test_eval)
+        logreg_model, logreg_scores, logreg_preds, c, nnotzero = train_logreg(trX, trY, vaX, vaY, teX, teY, eval_test=not args.no_test_eval, 
+                                                                              report_metric=args.report_metric, threshold_metric=args.threshold_metric,
+                                                                              automatic_thresholding=args.automatic_thresholding, micro=args.micro)
         print(', '.join([str(score) for score in logreg_scores]), 'train, val, test accuracy for all neuron regression')
         print(str(c)+' regularization coefficient used')
         print(str(nnotzero) + ' features used in all neuron regression\n')

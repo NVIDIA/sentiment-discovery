@@ -15,8 +15,6 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 import numpy as np
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import matthews_corrcoef
 
 from fp16 import FP16_Module, FP16_Optimizer
 from apex.reparameterization import apply_weight_norm, remove_weight_norm
@@ -162,80 +160,6 @@ def score_and_predict(model, X, Y):
     accuracy = (np.squeeze(Y) == np.squeeze(clf)).mean()
     return accuracy, probs
 
-def train_logreg(trX, trY, vaX=None, vaY=None, teX=None, teY=None, penalty='l1', max_iter=100,
-        C=2**np.arange(-8, 1).astype(np.float), seed=42, model=None, eval_test=True, neurons=None,
-        drop_neurons=False, mcc=False):
-    """
-    slightly modified version of openai implementation https://github.com/openai/generating-reviews-discovering-sentiment/blob/master/utils.py
-    if model is not None it doesn't train the model before scoring, it just scores the model
-    """
-    # if only integer is provided for C make it iterable so we can loop over
-    if not isinstance(C, collections.Iterable):
-        C = list([C])
-    # extract features for given neuron indices
-    if neurons is not None:
-        if drop_neurons:
-            all_neurons = set(list(range(trX.shape[-1])))
-            neurons = set(list(neurons))
-            neurons = list(all_neurons - neurons)
-        trX = trX[:, neurons]
-        if vaX is not None:
-            vaX = vaX[:, neurons]
-        if teX is not None:
-            teX = teX[:, neurons]
-
-    # Cross validation over C
-    scores = []
-    if model is None:
-        for i, c in enumerate(C):
-            model = LogisticRegression(C=c, penalty=penalty, max_iter=max_iter, random_state=seed+i)
-            model.fit(trX, trY)
-            if vaX is not None:
-                if mcc:
-                    score = matthews_corrcoef(model.predict(vaX), vaY)
-                else:
-                    score = model.score(vaX, vaY)
-            else:
-                if mcc:
-                    score = matthews_corrcoef(model.predict(trX), trY)
-                else:
-                    score = model.score(trX, trY)
-            print(score)
-            scores.append(score)
-            del model
-        c = C[np.argmax(scores)]
-        model = LogisticRegression(C=c, penalty=penalty, max_iter=max_iter, random_state=seed+len(C))
-        model.fit(trX, trY)
-    else:
-        c = model.C
-    # predict probabilities and get accuracy of regression model on train, val, test as appropriate
-    # also get number of regression weights that are not zero. (number of features used for modeling)
-    nnotzero = np.sum(model.coef_ != 0)
-    scores = []
-    probs = []
-    train_score, train_probs = score_and_predict(model, trX, trY)
-    scores.append(train_score*100)
-    probs.append(train_probs)
-    if vaX is None:
-        eval_data = trX
-        val_score = train_score
-        val_probs = train_probs
-    else:
-        eval_data = vaX
-        val_score, val_probs = score_and_predict(model, vaX, vaY)
-    scores.append(val_score*100)
-    probs.append(val_probs)
-    eval_score = val_score
-    eval_probs = val_probs
-    if teX is not None and teY is not None:
-        if eval_test:
-            eval_score, eval_probs = score_and_predict(model, teX, teY)
-        else:
-            eval_probs = model.predict_proba(teX)[:, 1]
-    scores.append(eval_score*100)
-    probs.append(eval_probs)
-    return model, scores, probs, c, nnotzero
-
 def get_top_k_neuron_weights(model, k=1):
     """
     Get's the indices of the top weights based on the l1 norm contributions of the weights
@@ -354,7 +278,9 @@ def main():
 
     # train logistic regression model of featurized text against labels
     start = time.time()
-    logreg_model, logreg_scores, logreg_probs, c, nnotzero = train_logreg(trXt, trY, vaXt, vaY, teXt, teY, max_iter=args.epochs, eval_test=not args.no_test_eval, seed=args.seed, mcc=args.mcc)
+    metric = 'mcc' if args.mcc else 'acc'
+    logreg_model, logreg_scores, logreg_probs, c, nnotzero = train_logreg(trXt, trY, vaXt, vaY, teXt, teY, max_iter=args.epochs, eval_test=not args.no_test_eval,
+                                                                          seed=args.seed, report_metric=metric, threshold_metric=metric)
     end = time.time()
     elapsed_time = end - start
 
@@ -392,7 +318,9 @@ def main():
 
     # train logistic regression model of features corresponding to sentiment neuron indices against labels
     start = time.time()
-    logreg_neuron_model, logreg_neuron_scores, logreg_neuron_probs, neuron_c, neuron_nnotzero = train_logreg(trXt, trY, vaXt, vaY, teXt, teY, max_iter=args.epochs, eval_test=not args.no_test_eval, seed=args.seed, neurons=sentiment_neurons, drop_neurons=args.drop_neurons, mcc=args.mcc)
+    logreg_neuron_model, logreg_neuron_scores, logreg_neuron_probs, neuron_c, neuron_nnotzero = train_logreg(trXt, trY, vaXt, vaY, teXt, teY, max_iter=args.epochs, eval_test=not args.no_test_eval,
+                                                                                                             seed=args.seed, neurons=sentiment_neurons, drop_neurons=args.drop_neurons,
+                                                                                                             report_metric=metric, threshold_metric=metric)
     end = time.time()
 
     if args.drop_neurons:
@@ -407,7 +335,8 @@ def main():
         print(str(neuron_c)+' regularization coefficient used')
 
         start = time.time()
-        logreg_neuron_model, logreg_neuron_scores, logreg_neuron_probs, neuron_c, neuron_nnotzero = train_logreg(trXt, trY, vaXt, vaY, teXt, teY, max_iter=args.epochs, eval_test=not args.no_test_eval, seed=args.seed, neurons=sentiment_neurons, mcc=args.mcc)
+        logreg_neuron_model, logreg_neuron_scores, logreg_neuron_probs, neuron_c, neuron_nnotzero = train_logreg(trXt, trY, vaXt, vaY, teXt, teY, max_iter=args.epochs, eval_test=not args.no_test_eval,
+                                                                                                                 seed=args.seed, neurons=sentiment_neurons, report_metric=metric, threshold_metric=metric)
         end = time.time()
 
     print('%d neuron regression took %s seconds'%(args.neurons, str(end-start)))
