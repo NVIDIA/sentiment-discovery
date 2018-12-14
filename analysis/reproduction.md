@@ -90,7 +90,7 @@ Since no test set is available we report our numbers on the validation set. To r
 
 Results should line up approximately with below.
 
-![SemEval Classifier Results](../figures/semeval_results.png)
+![SemEval Classifier Results](../figures/semeval_results.PNG)
 
 ## ELMo Comparison
 To analyze how our pretraining, transfer, and finetuning methods stack up to other state of the art models and techniques we utilize the publicly available ELMo language model as a baseline. In order to reproduce our results with ELMo please switch to the [ELMo branch](https://github.com/NVIDIA/sentiment-discovery/tree/elmo).
