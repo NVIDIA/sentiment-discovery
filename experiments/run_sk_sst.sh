@@ -1,2 +1,2 @@
 #! /bin/bash
-python3 transfer.py --load new_mlstm.pt --save-results sst
+python3 transfer.py --load mlstm.pt --save-results sst

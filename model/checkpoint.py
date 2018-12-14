@@ -6,7 +6,7 @@
 # Copyright (c) 2016, Facebook, inc (Adam Paszke). All rights reserved.
 ###############################################################################
 '''
-Code adapted from https://github.com/pytorch/fairseq/blob/master/fairseq/models/transformer.py
+Code adapted from https://github.com/pytorch/pytorch/blob/master/torch/utils/checkpoint.py
 Introduced rng management in order to get correct results with random layers (eg. dropout)
 '''
 
