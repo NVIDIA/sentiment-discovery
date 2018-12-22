@@ -22,7 +22,8 @@ def get_variance(tp, tn, fp, fn, std):
     return std / total
 
 # TODO: Also return variance per class (in multihead sense) as a metric
-def get_metric(infos, metric=None, micro=None):
+def get_metric(infos, metric=None, micro=False):
+    """Essentially a case-switch for getting a metric"""
     metrics = {
         'acc'  : get_accuracy,
         'jacc' : get_jaccard_index,
@@ -40,6 +41,8 @@ def get_metric(infos, metric=None, micro=None):
     stats = ['tp', 'tn', 'fp', 'fn', 'std']
 
     if micro:
+        # micro averaging computes the metric after aggregating
+        # all of the parameters from sets being averaged
         for info in infos:
             tp += info['tp']
             tn += info['tn']
@@ -48,20 +51,24 @@ def get_metric(infos, metric=None, micro=None):
             std += info['std']
         return metric(tp, tn, fp, fn, std)
     else:
+        # macro averaging computes the metric on each set
+        # and averages the metrics afterward
         individual_metrics = []
         for info in infos:
             individual_metrics.append(metric(*[info[s].item() for s in stats]))
         return sum(individual_metrics) / len(individual_metrics)
 
+# Metrics as functions of true positive, true negative,
+# false positive, false negative, standard deviation
 def get_precision(tp, tn, fp, fn, std):
     if tp == 0:
         return 0
-    return tp / (tp+fp)
+    return tp / (tp + fp)
 
 def get_recall(tp, tn, fp, fn, std):
     if tp == 0:
         return 0
-    return tp / (tp+fn)
+    return tp / (tp + fn)
 
 def get_jaccard_index(tp, tn, fp, fn, std):
     if tp == 0:
