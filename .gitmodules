@@ -1,0 +1,3 @@
+[submodule "apex"]
+	path = apex
+	url = https://github.com/NVIDIA/apex.git
