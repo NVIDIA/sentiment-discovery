@@ -16,7 +16,7 @@ import numpy as np
 from logreg_utils import train_logreg
 
 from fp16 import FP16_Module, FP16_Optimizer
-from apex.reparameterization import apply_weight_norm, remove_weight_norm
+from reparameterization import apply_weight_norm, remove_weight_norm
 
 import model as M
 from tqdm import tqdm

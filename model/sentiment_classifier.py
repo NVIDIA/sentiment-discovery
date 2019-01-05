@@ -4,7 +4,7 @@ import torch.nn.functional as F
 
 import numpy as np
 from itertools import chain
-from model import RNNFeaturizer, TransformerFeaturizer
+from .model import RNNFeaturizer, TransformerFeaturizer
 from .transformer_utils import GeLU
 
 class BinaryClassifier(nn.Module):

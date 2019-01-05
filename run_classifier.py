@@ -13,7 +13,7 @@ import torch.nn.functional as F
 import numpy as np
 import pandas as pd
 
-from apex.reparameterization import apply_weight_norm, remove_weight_norm
+from reparameterization import apply_weight_norm, remove_weight_norm
 
 from model import SentimentClassifier
 from configure_data import configure_data

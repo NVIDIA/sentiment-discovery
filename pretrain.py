@@ -17,7 +17,7 @@ import data
 import model as m
 from model import DistributedDataParallel as DDP
 
-from apex.reparameterization import apply_weight_norm, remove_weight_norm
+from reparameterization import apply_weight_norm, remove_weight_norm
 from configure_data import configure_data
 from learning_rates import AnnealingLR, WarmupLR, SlantedTriangularLR
 from arguments import add_general_args, add_model_args, add_unsupervised_data_args

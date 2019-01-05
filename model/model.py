@@ -5,7 +5,7 @@ import torch.nn as nn
 from torch.autograd import Variable
 import torch.nn.functional as F
 
-from apex import RNN
+from .RNN_utils import RNN
 from .transformer_utils import Embedding
 from .transformer import TransformerDecoder
 
