@@ -1,3 +1,9 @@
+# ** DEPRECATED **
+This repo has been deprecated. Please visit [Megatron-LM](https://github.com/NVIDIA/Megatron-LM) for our up to date Large-scale unsupervised pretraining and finetuning code.
+
+If you would still like to use this codebase, see our tagged releases and install required software/dependencies that was available publicly at that date.
+
+
 # PyTorch Unsupervised Sentiment Discovery
 This codebase contains pretrained binary sentiment and multimodel emotion classification models as well as code to reproduce results from our series of large scale pretraining + transfer NLP papers: _[Large Scale Language Modeling: Converging on 40GB of Text in Four Hours](https://nv-adlr.github.io/publication/2018-large-batch-lm)_ and _[Practical Text Classification With Large Pre-Trained Language Models](https://arxiv.org/abs/1812.01207)_. This effort was born out of a desire to reproduce, analyze, and scale the [Generating Reviews and Discovering Sentiment](https://github.com/openai/generating-reviews-discovering-sentiment) paper from OpenAI.
 
