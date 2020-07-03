@@ -119,9 +119,9 @@ Performs classification on Binary SST by default.
 Output classification probabilities are saved to a `.npy` file
 
 ```
-python3 run_classifier.py --load_model ama_sst.pt                               # classify Binary SST
-python3 run_classifier.py --load_model ama_sst_16.pt --fp16                     # run classification in fp16
-python3 run_classifier.py --load_model ama_sst.pt --text-key <text-column> --data <path.csv>     # classify your own dataset
+python3 run_classifier.py --load ama_sst.pt                               # classify Binary SST
+python3 run_classifier.py --load ama_sst_16.pt --fp16                     # run classification in fp16
+python3 run_classifier.py --load ama_sst.pt --text-key <text-column> --data <path.csv>     # classify your own dataset
 ```
 
 See [here](./script_docs/arguments.md#running-a-classifier-arguments) for more documentation.
