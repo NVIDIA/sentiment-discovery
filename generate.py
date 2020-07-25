@@ -24,6 +24,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 sns.set_style({'font.family': 'monospace'})
 
+import sys, termios, tty, cv2
 
 parser = argparse.ArgumentParser(description='PyTorch Sentiment Discovery Generation/Visualization')
 
@@ -43,11 +44,11 @@ parser.add_argument('--all_layers', action='store_true',
 parser.add_argument('--tied', action='store_true',
                     help='tie the word embedding and softmax weights')
 parser.add_argument('--load_model', type=str, default='model.pt',
-                    help='model checkpoint to use')
+                    help='model checkpoint to use') #use imdb_clf.pt model provided in the readme.
 parser.add_argument('--save', type=str, default='generated.txt',
                     help='output file for generated text')
 parser.add_argument('--gen_length', type=int, default='1000',
-                    help='number of tokens to generate')
+                    help='number of tokens to generate') #use --gen_length -1
 parser.add_argument('--seed', type=int, default=-1,
                     help='random seed')
 parser.add_argument('--temperature', type=float, default=1.0,
@@ -63,8 +64,9 @@ parser.add_argument('--visualize', action='store_true',
                     help='generates heatmap of main neuron activation [not working yet]')
 parser.add_argument('--overwrite', type=float, default=None,
                     help='Overwrite value of neuron s.t. generated text reads as a +1/-1 classification')
-parser.add_argument('--text', default='',
-                    help='warm up generation with specified text first')
+#dont need --text arg.
+#parser.add_argument('--text', default='',
+#                    help='warm up generation with specified text first')
 args = parser.parse_args()
 
 args.data_size = 256
@@ -109,7 +111,7 @@ def get_neuron_and_polarity(sd, neuron):
         return neuron, 1
     if neuron is None:
         val, neuron = torch.max(torch.abs(weight[0].float()), 0)
-        neuron = neuron[0]
+        neuron = neuron.item()
     val = weight[0][neuron]
     if val >= 0:
         polarity = 1
@@ -196,13 +198,24 @@ def make_heatmap(text, values, save=None, polarity=1):
     plt.figure(figsize=(cell_width*n_limit, cell_height*num_rows))
     hmap=sns.heatmap(values, annot=text, mask=mask, fmt='', vmin=-1, vmax=1, cmap='RdYlGn',
                      xticklabels=False, yticklabels=False, cbar=False)
-    plt.tight_layout()
+    #plt.tight_layout()
     if save is not None:
         plt.savefig(save)
     # clear plot for next graph since we returned `hmap`
     plt.clf()
+    plt.close()
     return hmap
 
+#return each character entered by the user
+def getchar():
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    try:
+        tty.setraw(sys.stdin.fileno())
+        ch = sys.stdin.read(1)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+    return ch
 
 neuron, polarity = get_neuron_and_polarity(sd, args.neuron)
 neuron = neuron if args.visualize or args.overwrite is not None else None
@@ -224,19 +237,45 @@ input.data.fill_(sample(out, args.temperature))
 
 outchrs = []
 outvals = []
-#with open(args.save, 'w') as outf:
-with torch.no_grad():
-    if args.text != '':
-        chrs, vals = process_text(args.text, model, input, args.temperature, neuron, mask, args.overwrite, polarity)
-        outchrs += chrs
-        outvals += vals
-    chrs, vals = generate(args.gen_length, model, input, args.temperature, neuron, mask, args.overwrite, polarity)
-    outchrs += chrs
-    outvals += vals
-outstr = ''.join(outchrs)
-print(outstr)
-with open(args.save, 'w') as f:
-    f.write(outstr)
+input_chars = []
+text = ""
+print("Enter Text:")
 
-if args.visualize:
-    make_heatmap(outchrs, outvals, os.path.splitext(args.save)[0]+'.png', polarity)
+#In this loop, word by word user input is processed for heatmap generation.
+#To exit from this loop, press esc.
+while True:
+    sys.stdout.flush()
+    c = getchar()
+
+    if (c == "\x1b"):
+        print("\n")
+        exit(0)
+    elif (c == "\x7f" and len(input_chars) > 0):
+        input_chars.pop()
+        sys.stdout.write("\b \b")
+        continue
+    elif (c=='\r'):
+        print()
+        continue
+    print(c,end='')
+    input_chars.append(c)
+    text = ''.join(input_chars)
+
+    if  (c == " " or c == "." or c == "!" or c == "@" or c == "#" or c == "$" or c == "%" or c == "&" or c == "*" or c == "?"):
+        #with open(args.save, 'w') as outf:
+        with torch.no_grad():
+            if text != '':
+                chrs, vals = process_text(text, model, input, args.temperature, neuron, mask, args.overwrite, polarity)
+                outchrs += chrs
+                outvals += vals
+                del input_chars[:]
+            chrs, vals = generate(args.gen_length, model, input, args.temperature, neuron, mask, args.overwrite, polarity)
+            outchrs += chrs
+            outvals += vals
+        if args.visualize:
+            make_heatmap(outchrs, outvals, os.path.splitext(args.save)[0]+'.png', polarity)
+        output_img = cv2.imread(os.path.splitext(args.save)[0]+'.png')
+        cv2.imshow("output",output_img)
+        cv2.waitKey(1)
+        if 0xFF == ord('q'):
+            sys.exit()
